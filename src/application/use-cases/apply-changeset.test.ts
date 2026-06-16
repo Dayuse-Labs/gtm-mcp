@@ -80,4 +80,40 @@ describe('applyChangeset', () => {
     const r = await applyChangeset(deps, collaborator({ id: 'someone-else' }), previewId);
     expect(!r.success && r.error.code).toBe('forbidden');
   });
+
+  it('on entity-write failure, discards the workspace and persists nothing', async () => {
+    const { gtm, changesets, author, deps, previewId } = await setup();
+    gtm.failEntityWrite = true;
+    const r = await applyChangeset(deps, author, previewId);
+    expect(!r.success && r.error.code).toBe('gtm_error');
+    expect(!r.success && r.error.message).toContain('workspace discarded');
+    expect(gtm.calls.some((c) => c.op === 'deleteWorkspace')).toBe(true);
+    expect(changesets.store.size).toBe(0);
+  });
+
+  it('when rollback cannot delete the workspace, reports the orphan instead of lying', async () => {
+    const { gtm, author, deps, previewId } = await setup();
+    gtm.failEntityWrite = true;
+    gtm.failDeleteWorkspace = true; // missing delete scope (ADR 0003)
+    const r = await applyChangeset(deps, author, previewId);
+    expect(!r.success && r.error.code).toBe('gtm_error');
+    expect(!r.success && r.error.message).not.toContain('workspace discarded');
+    expect(!r.success && r.error.message).toContain('ws-new'); // the orphan id
+    expect(!r.success && r.error.message).toContain('discard it manually');
+    expect(!r.success && r.error.message).toContain('tagmanager.google.com');
+  });
+
+  it('nudges consolidation when the container already had other workspaces', async () => {
+    const { gtm, author, deps, previewId } = await setup();
+    gtm.workspaceCount = 2; // Default + one existing AI workspace
+    const r = await applyChangeset(deps, author, previewId);
+    expect(r.success && r.data.note).toContain('batch');
+  });
+
+  it('does not nudge consolidation for the first workspace', async () => {
+    const { gtm, author, deps, previewId } = await setup();
+    gtm.workspaceCount = 1; // only the Default workspace
+    const r = await applyChangeset(deps, author, previewId);
+    expect(r.success && r.data.note).not.toContain('batch');
+  });
 });

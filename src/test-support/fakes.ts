@@ -18,7 +18,7 @@ import {
   type UsageRollup,
 } from '../domain/repositories/tool-call-repository.js';
 import { type Notifier, type ToolErrorAlert } from '../domain/ports/notifier.js';
-import { type Result, ok } from '../shared/result.js';
+import { type Result, ok, err } from '../shared/result.js';
 
 export function emptyState(): ContainerState {
   const s: Partial<Record<EntityType, readonly GtmEntitySnapshot[]>> = {};
@@ -59,6 +59,11 @@ export class FakeGtmClient implements GtmClient {
   public calls: RecordedCall[] = [];
   private idSeq = 0;
 
+  /** When set, entity create/update return an error — exercises the apply rollback path. */
+  public failEntityWrite = false;
+  /** When set, deleteWorkspace returns an error — simulates the missing delete scope (ADR 0003). */
+  public failDeleteWorkspace = false;
+
   constructor(
     public state: ContainerState,
     public workspaceCount = 1,
@@ -84,6 +89,7 @@ export class FakeGtmClient implements GtmClient {
   }
   deleteWorkspace(_c: ContainerAlias, id: string): Promise<Result<void>> {
     this.calls.push({ op: 'deleteWorkspace', id });
+    if (this.failDeleteWorkspace) return Promise.resolve(err(new Error('Insufficient Permission')));
     return Promise.resolve(ok(undefined));
   }
   createEntity(
@@ -94,6 +100,7 @@ export class FakeGtmClient implements GtmClient {
     this.idSeq += 1;
     const id = `new-${this.idSeq}`;
     this.calls.push({ op: 'create', kind, id });
+    if (this.failEntityWrite) return Promise.resolve(err(new Error('create boom')));
     const name = typeof data.name === 'string' ? data.name : 'created';
     return Promise.resolve(ok(snap(kind, id, name, 'fp-new', data)));
   }
@@ -104,6 +111,7 @@ export class FakeGtmClient implements GtmClient {
     data: Record<string, unknown>,
   ): Promise<Result<GtmEntitySnapshot>> {
     this.calls.push({ op: 'update', kind, id });
+    if (this.failEntityWrite) return Promise.resolve(err(new Error('update boom')));
     const name = typeof data.name === 'string' ? data.name : 'updated';
     return Promise.resolve(ok(snap(kind, id, name, 'fp-upd', data)));
   }

@@ -173,11 +173,19 @@ export async function applyChangeset(
     return rollback(deps, preview.container, workspace, 'failed to persist changeset');
 
   await deps.previews.delete(previewId);
+  // Soft consolidation nudge (bug: a feature applied in pieces splits across workspaces and burns
+  // the 3-slot cap). wsCount.data is the count BEFORE this apply: ≥2 means a non-Default workspace
+  // already existed, so this is at least the 2nd. Keep one-changeset-per-workspace (ADR 0005) and
+  // batch a feature's edits into a single changeset.
+  const splitHint =
+    wsCount.data >= 2
+      ? ` Note: ${preview.container} already had ${wsCount.data} workspaces — batch a feature's edits into ONE changeset so it lands in a single workspace (GTM caps at ${GTM_WORKSPACE_LIMIT}).`
+      : '';
   return ok({
     changesetId,
     workspace,
     summary: preview.summary,
-    note: 'Applied to a workspace. Review and PUBLISH it in the GTM UI — the agent never publishes (ADR 0003).',
+    note: `Applied to a workspace. Review and PUBLISH it in the GTM UI — the agent never publishes (ADR 0003).${splitHint}`,
   });
 }
 
@@ -187,6 +195,20 @@ async function rollback(
   ws: GtmWorkspaceRef,
   reason: string,
 ): Promise<Result<never, ApplyError>> {
-  await deps.gtm.deleteWorkspace(container, ws.id);
-  return err(new ApplyError(`Apply failed (${reason}); workspace discarded.`, 'gtm_error'));
+  // We hold edit scope but NOT tagmanager.delete.containers (ADR 0003), so deleteWorkspace can
+  // fail with "Insufficient Permission" — the workspace then survives and eats a slot of GTM's
+  // 3-workspace cap. Never claim it was discarded when it wasn't; report the orphan so a human
+  // can discard it in the UI (the only place with delete rights).
+  const discarded = await deps.gtm.deleteWorkspace(container, ws.id);
+  if (discarded.success) {
+    return err(new ApplyError(`Apply failed (${reason}); workspace discarded.`, 'gtm_error'));
+  }
+  return err(
+    new ApplyError(
+      `Apply failed (${reason}). Could NOT auto-discard workspace ${ws.id} (${discarded.error.message}); ` +
+        `it still occupies a workspace slot — discard it manually in the GTM UI: ` +
+        `https://tagmanager.google.com/#/container/${ws.path}`,
+      'gtm_error',
+    ),
+  );
 }
