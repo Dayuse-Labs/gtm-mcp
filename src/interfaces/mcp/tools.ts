@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { type McpServer, type ToolCallback } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { ContainerAliasSchema } from '../../domain/value-objects/container-alias.js';
 import { EntityTypeSchema, OperationsSchema } from '../../domain/value-objects/operation.js';
@@ -9,6 +9,8 @@ import { type MirrorReader } from '../../domain/ports/mirror-reader.js';
 import { type DatalayerCatalog } from '../../domain/ports/datalayer-catalog.js';
 import { type PreviewRepository } from '../../domain/repositories/preview-repository.js';
 import { type ChangesetRepository } from '../../domain/repositories/changeset-repository.js';
+import { type ToolCallRepository } from '../../domain/repositories/tool-call-repository.js';
+import { isAdmin } from '../../domain/entities/collaborator.js';
 import { getIdentity } from '../../application/use-cases/get-identity.js';
 import { pullContainer } from '../../application/use-cases/pull-container.js';
 import { exportContainer } from '../../application/use-cases/export-container.js';
@@ -28,6 +30,7 @@ export interface Services {
   readonly mirrorReader: MirrorReader;
   readonly previews: PreviewRepository;
   readonly changesets: ChangesetRepository;
+  readonly toolCalls: ToolCallRepository;
   readonly containers: { readonly web: string; readonly server: string };
   readonly now: () => Date;
   readonly newId: () => string;
@@ -44,9 +47,121 @@ const fail = (msg: string): CallToolResult => ({
   isError: true,
 });
 
+// ---------- Per-call observability log (ADR 0010) ----------
+
+const ERROR_MESSAGE_CAP = 500;
+
+const containerOf = (args: unknown): string | null => {
+  if (args === null || typeof args !== 'object') return null;
+  const c = (args as { container?: unknown }).container;
+  return typeof c === 'string' ? c : null;
+};
+
+const sessionIdOf = (extra: unknown): string | null => {
+  if (extra === null || typeof extra !== 'object') return null;
+  const sid = (extra as { sessionId?: unknown }).sessionId;
+  return typeof sid === 'string' ? sid : null;
+};
+
+/**
+ * Sanitized arg shape — NEVER raw operation bodies, query text, refs/names/ids
+ * (RGPD: data minimisation, ADR 0010). Only counts, lengths, presence, and bounded enums.
+ */
+const summarizeArgs = (args: unknown): Record<string, unknown> | null => {
+  if (args === null || typeof args !== 'object') return null;
+  const a = args as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  if (Array.isArray(a.operations)) out.opsCount = a.operations.length;
+  if (typeof a.query === 'string') out.queryLength = a.query.length;
+  if (typeof a.filter === 'string') out.filterLength = a.filter.length;
+  if (typeof a.name === 'string') out.nameLength = a.name.length;
+  if (typeof a.type === 'string') out.type = a.type; // entity-type enum — bounded, safe
+  if (typeof a.mode === 'string') out.mode = a.mode; // compact | full — safe
+  if (typeof a.status === 'string') out.status = a.status; // changeset-status enum — safe
+  if (typeof a.sinceHours === 'number') out.sinceHours = a.sinceHours;
+  if (typeof a.ref === 'string') out.hasRef = true; // arbitrary name/id — presence only
+  if (typeof a.id === 'string') out.hasId = true;
+  if (typeof a.previewId === 'string') out.hasPreviewId = true;
+  if (typeof a.changesetId === 'string') out.hasChangesetId = true;
+  return Object.keys(out).length > 0 ? out : null;
+};
+
+const firstText = (r: CallToolResult): string | null => {
+  const c = r.content[0];
+  return c !== undefined && c.type === 'text' ? c.text.slice(0, ERROR_MESSAGE_CAP) : null;
+};
+
+/**
+ * Fire-and-forget append of one tool call. Resolves identity and writes off the
+ * request path; a logging fault is swallowed to console (never fails the call).
+ */
+const recordCall = (
+  s: Services,
+  tool: string,
+  args: unknown,
+  extra: unknown,
+  outcome: 'ok' | 'error',
+  errorMessage: string | null,
+  durationMs: number,
+): void => {
+  void (async () => {
+    try {
+      const who = await s.actor.identify();
+      await s.toolCalls.record({
+        collaboratorId: who?.id ?? null,
+        sessionId: sessionIdOf(extra),
+        tool,
+        container: containerOf(args),
+        outcome,
+        errorMessage,
+        durationMs,
+        argSummary: summarizeArgs(args),
+        createdAt: s.now(),
+      });
+    } catch (e) {
+      console.error(`[tool-call-log] record failed for ${tool}:`, e);
+    }
+  })();
+};
+
+/** Wrap a tool handler so every call is timed + logged with its outcome (ADR 0010). */
+const wrapWithLogging = <InputArgs extends z.ZodRawShape>(
+  s: Services,
+  tool: string,
+  handler: ToolCallback<InputArgs>,
+): ToolCallback<InputArgs> => {
+  const run = handler as unknown as (
+    args: unknown,
+    extra: unknown,
+  ) => CallToolResult | Promise<CallToolResult>;
+  const wrapped = async (args: unknown, extra: unknown): Promise<CallToolResult> => {
+    const start = Date.now();
+    try {
+      const result = await run(args, extra);
+      const outcome = result.isError === true ? 'error' : 'ok';
+      recordCall(s, tool, args, extra, outcome, outcome === 'error' ? firstText(result) : null, Date.now() - start);
+      return result;
+    } catch (e) {
+      recordCall(s, tool, args, extra, 'error', e instanceof Error ? e.message : String(e), Date.now() - start);
+      throw e;
+    }
+  };
+  return wrapped as unknown as ToolCallback<InputArgs>;
+};
+
 export function registerTools(server: McpServer, s: Services): void {
+  // Register through a wrapper so EVERY tool call is logged uniformly (ADR 0010).
+  const register = server.registerTool.bind(server);
+  const reg = <InputArgs extends z.ZodRawShape>(
+    name: string,
+    config: { description: string; inputSchema: InputArgs },
+    handler: ToolCallback<InputArgs>,
+  ): void => {
+    register(name, config, wrapWithLogging(s, name, handler));
+  };
+
   // ---------- Read / discovery ----------
-  server.registerTool(
+  reg(
     'list_containers',
     {
       description: 'List the registered web/server containers and their GTM ids.',
@@ -55,7 +170,7 @@ export function registerTools(server: McpServer, s: Services): void {
     () => text({ web: s.containers.web, server: s.containers.server }),
   );
 
-  server.registerTool(
+  reg(
     'whoami',
     { description: 'Return the current collaborator and their GTM access.', inputSchema: {} },
     async () => {
@@ -68,7 +183,7 @@ export function registerTools(server: McpServer, s: Services): void {
     },
   );
 
-  server.registerTool(
+  reg(
     'pull',
     {
       description: 'Refresh the local mirror from GTM and return a change summary.',
@@ -82,7 +197,7 @@ export function registerTools(server: McpServer, s: Services): void {
     },
   );
 
-  server.registerTool(
+  reg(
     'list_entities',
     {
       description:
@@ -106,7 +221,7 @@ export function registerTools(server: McpServer, s: Services): void {
     },
   );
 
-  server.registerTool(
+  reg(
     'get_entity',
     {
       description: 'Get one entity (full GTM JSON) by name or id.',
@@ -126,7 +241,7 @@ export function registerTools(server: McpServer, s: Services): void {
     },
   );
 
-  server.registerTool(
+  reg(
     'get_examples',
     {
       description:
@@ -141,7 +256,7 @@ export function registerTools(server: McpServer, s: Services): void {
     },
   );
 
-  server.registerTool(
+  reg(
     'export_container',
     {
       description:
@@ -161,7 +276,7 @@ export function registerTools(server: McpServer, s: Services): void {
     },
   );
 
-  server.registerTool(
+  reg(
     'search_container',
     {
       description:
@@ -174,7 +289,7 @@ export function registerTools(server: McpServer, s: Services): void {
     },
   );
 
-  server.registerTool(
+  reg(
     'workspace_status',
     {
       description:
@@ -198,7 +313,7 @@ export function registerTools(server: McpServer, s: Services): void {
     },
   );
 
-  server.registerTool(
+  reg(
     'list_changesets',
     {
       description: 'List changesets, optionally filtered by container/status.',
@@ -222,7 +337,7 @@ export function registerTools(server: McpServer, s: Services): void {
     },
   );
 
-  server.registerTool(
+  reg(
     'get_changeset',
     {
       description: 'Get a changeset with its operations, status and before-images.',
@@ -236,7 +351,7 @@ export function registerTools(server: McpServer, s: Services): void {
   );
 
   // ---------- Write / workflow ----------
-  server.registerTool(
+  reg(
     'preview',
     {
       description:
@@ -267,7 +382,7 @@ export function registerTools(server: McpServer, s: Services): void {
     },
   );
 
-  server.registerTool(
+  reg(
     'apply',
     {
       description:
@@ -292,7 +407,7 @@ export function registerTools(server: McpServer, s: Services): void {
     },
   );
 
-  server.registerTool(
+  reg(
     'reject',
     {
       description: 'Reject a pending changeset and delete its workspace, freeing a slot.',
@@ -316,7 +431,7 @@ export function registerTools(server: McpServer, s: Services): void {
     },
   );
 
-  server.registerTool(
+  reg(
     'inverse',
     {
       description:
@@ -329,11 +444,29 @@ export function registerTools(server: McpServer, s: Services): void {
       ),
   );
 
+  // ---------- Observability (ADR 0010) ----------
+  reg(
+    'usage_stats',
+    {
+      description:
+        'Admin-only. Usage + error counts grouped by collaborator and tool over the last sinceHours (default 24) — answers "usage per collaborator" and "is everything going right".',
+      inputSchema: { sinceHours: z.number().int().positive().max(8760).optional() },
+    },
+    async (args) => {
+      const a = await s.actor.resolve();
+      if (!a.success) return fail(a.error.message);
+      if (!isAdmin(a.data.collaborator)) return fail('usage_stats is admin-only.');
+      const sinceHours = args.sinceHours ?? 24;
+      const v = await s.toolCalls.usage(sinceHours);
+      return v.success ? text({ sinceHours, usage: v.data }) : fail(v.error.message);
+    },
+  );
+
   // ---------- dataLayer catalog (ADR 0008) ----------
   const catalogNotConfigured = (): CallToolResult =>
     fail('dataLayer catalog not configured (set GITLAB_TOKEN + GITLAB_CATALOG_PROJECT_ID).');
 
-  server.registerTool(
+  reg(
     'list_datalayer_events',
     {
       description:
@@ -347,7 +480,7 @@ export function registerTools(server: McpServer, s: Services): void {
     },
   );
 
-  server.registerTool(
+  reg(
     'get_datalayer_event',
     {
       description:
@@ -364,7 +497,7 @@ export function registerTools(server: McpServer, s: Services): void {
     },
   );
 
-  server.registerTool(
+  reg(
     'get_datalayer_type',
     {
       description:
@@ -395,6 +528,7 @@ export const TOOL_NAMES = [
   'apply',
   'reject',
   'inverse',
+  'usage_stats',
   'list_datalayer_events',
   'get_datalayer_event',
   'get_datalayer_type',

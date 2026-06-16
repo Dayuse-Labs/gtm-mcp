@@ -13,6 +13,7 @@ import { PgCollaboratorRepository } from './infrastructure/repositories/pg-colla
 import { PgOAuthTokenRepository } from './infrastructure/repositories/pg-oauth-token-repository.js';
 import { PgChangesetRepository } from './infrastructure/repositories/pg-changeset-repository.js';
 import { PgPreviewRepository } from './infrastructure/repositories/pg-preview-repository.js';
+import { PgToolCallRepository } from './infrastructure/repositories/pg-tool-call-repository.js';
 import { FileMirror } from './infrastructure/mirror/file-mirror.js';
 import { GitlabDatalayerCatalog } from './infrastructure/gtm/gitlab-datalayer-catalog.js';
 import { DevActorContext } from './infrastructure/actor/actor-context.js';
@@ -41,6 +42,7 @@ const collaborators = new PgCollaboratorRepository(pool);
 const tokens = new PgOAuthTokenRepository(pool, cipher);
 const changesets = new PgChangesetRepository(pool);
 const previews = new PgPreviewRepository(pool);
+const toolCalls = new PgToolCallRepository(pool);
 const fileMirror = new FileMirror();
 const catalog =
   env.GITLAB_TOKEN !== undefined && env.GITLAB_CATALOG_PROJECT_ID !== undefined
@@ -55,6 +57,7 @@ const services: Services = {
   mirrorReader: fileMirror,
   previews,
   changesets,
+  toolCalls,
   containers: { web: cfg.webContainerId, server: cfg.serverContainerId },
   now: () => new Date(),
   newId: () => randomUUID(),

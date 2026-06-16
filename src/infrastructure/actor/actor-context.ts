@@ -13,6 +13,12 @@ export interface ResolvedActor {
 
 export interface ActorContext {
   resolve(): Promise<Result<ResolvedActor>>;
+  /**
+   * Cheap identity-only lookup for the tool-call log (ADR 0010): resolves WHO is
+   * calling without retrieving the token or building a GtmClient, so read-only
+   * tools get attributed too. Returns null (never throws) when nobody is identifiable.
+   */
+  identify(): Promise<Collaborator | null>;
 }
 
 /**
@@ -42,5 +48,10 @@ export class DevActorContext implements ActorContext {
     }
     const client = this.oauth.clientForRefreshToken(token.data);
     return ok({ collaborator, gtm: new GoogleApisGtmClient(client, this.cfg) });
+  }
+
+  async identify(): Promise<Collaborator | null> {
+    const recent = await this.collaborators.mostRecent();
+    return recent.success ? recent.data : null;
   }
 }

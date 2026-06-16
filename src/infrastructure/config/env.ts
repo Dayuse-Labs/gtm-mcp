@@ -28,6 +28,10 @@ const EnvSchema = z
     GOOGLE_CHAT_WEBHOOK_URL: z.string().url().optional(),
     PENDING_CHANGESET_TTL_HOURS: z.coerce.number().int().positive().default(72),
 
+    // Tool-call observability log retention (ADR 0010). Purged by the same scheduled
+    // job as pending-changeset TTL (README stub #4); data minimisation default = 90 days.
+    TOOL_CALL_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
+
     // dataLayer catalog (ADR 0008). Optional so the server boots without it; the catalog
     // tools report "not configured" when unset. Token set ⇒ project id is required.
     GITLAB_TOKEN: z.string().min(1).optional(),

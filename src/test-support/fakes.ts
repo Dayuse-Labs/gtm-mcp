@@ -12,6 +12,11 @@ import { type Preview } from '../domain/entities/preview.js';
 import { type Changeset, type ChangesetStatus } from '../domain/entities/changeset.js';
 import { type PreviewRepository } from '../domain/repositories/preview-repository.js';
 import { type ChangesetRepository } from '../domain/repositories/changeset-repository.js';
+import {
+  type ToolCallRepository,
+  type ToolCallRecord,
+  type UsageRollup,
+} from '../domain/repositories/tool-call-repository.js';
 import { type Result, ok } from '../shared/result.js';
 
 export function emptyState(): ContainerState {
@@ -147,6 +152,42 @@ export class InMemoryChangesetRepository implements ChangesetRepository {
       (c) => c.containerAlias === container && c.status === 'applied',
     ).length;
     return Promise.resolve(ok(n));
+  }
+}
+
+export class InMemoryToolCallRepository implements ToolCallRepository {
+  public records: ToolCallRecord[] = [];
+  record(call: ToolCallRecord): Promise<Result<void>> {
+    this.records.push(call);
+    return Promise.resolve(ok(undefined));
+  }
+  usage(_sinceHours: number): Promise<Result<readonly UsageRollup[]>> {
+    const groups = new Map<
+      string,
+      { email: string | null; tool: string; calls: number; errors: number; sum: number }
+    >();
+    for (const r of this.records) {
+      const key = `${r.collaboratorId ?? 'null'}::${r.tool}`;
+      const g = groups.get(key) ?? {
+        email: r.collaboratorId,
+        tool: r.tool,
+        calls: 0,
+        errors: 0,
+        sum: 0,
+      };
+      g.calls += 1;
+      if (r.outcome === 'error') g.errors += 1;
+      g.sum += r.durationMs;
+      groups.set(key, g);
+    }
+    const rows: UsageRollup[] = [...groups.values()].map((g) => ({
+      collaboratorEmail: g.email,
+      tool: g.tool,
+      calls: g.calls,
+      errors: g.errors,
+      avgDurationMs: Math.round(g.sum / g.calls),
+    }));
+    return Promise.resolve(ok(rows));
   }
 }
 

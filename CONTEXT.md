@@ -97,3 +97,9 @@ _Avoid_: user, operator, editor
 **Admin**:
 A trusted Collaborator (role stored in Postgres, granted via direct DB access) who may additionally act on _others'_ changesets — chiefly to reject a stuck pending changeset and free a workspace slot when its author is unavailable.
 _Avoid_: owner, superuser, root
+
+### Observability
+
+**Tool-call log**:
+The per-Collaborator record of every MCP tool invocation and its outcome (ok/error + duration) — the basis for usage-per-Collaborator and "is everything going right" visibility. Best-effort, not a compliance trail; carries a sanitized arg summary, never raw operation bodies or query text. Distinct from the Changeset audit trail.
+_Avoid_: audit, audit log (reserved for the Changeset sense), telemetry, metrics, analytics
