@@ -1,0 +1,5 @@
+# Railway sets NODE_ENV=production, which makes `npm ci` omit devDependencies.
+# typescript (tsc) is a devDependency needed only at build time, so force-install
+# dev deps in the install phase. The runtime still runs with NODE_ENV=production.
+[phases.install]
+cmds = ["npm ci --include=dev"]
