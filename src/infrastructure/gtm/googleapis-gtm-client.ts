@@ -5,6 +5,7 @@ import {
   type GtmEntitySnapshot,
   type GtmWorkspaceRef,
   type ContainerState,
+  WorkspaceNotFoundError,
 } from '../../domain/ports/gtm-client.js';
 import { type ContainerAlias } from '../../domain/value-objects/container-alias.js';
 import { type EntityType } from '../../domain/value-objects/operation.js';
@@ -29,6 +30,17 @@ export class NotImplementedError extends Error {
 
 function asRecord(item: unknown): Record<string, unknown> {
   return item as Record<string, unknown>;
+}
+
+/** A GTM API error is a 404 (resource gone) — read off the GaxiosError shape. */
+function isNotFound(e: unknown): boolean {
+  if (e === null || typeof e !== 'object') return false;
+  const { code, status, response } = e as {
+    code?: unknown;
+    status?: unknown;
+    response?: { status?: unknown };
+  };
+  return code === 404 || status === 404 || response?.status === 404;
 }
 
 /** GtmClient over GTM API v2, scoped to one collaborator's OAuth client. Never publishes (ADR 0003). */
@@ -201,13 +213,18 @@ export class GoogleApisGtmClient implements GtmClient {
     }
   }
 
-  async deleteWorkspace(alias: ContainerAlias, workspaceId: string): Promise<Result<void>> {
+  async deleteWorkspace(
+    alias: ContainerAlias,
+    workspaceId: string,
+  ): Promise<Result<void, WorkspaceNotFoundError | Error>> {
     try {
       await this.tm.accounts.containers.workspaces.delete({
         path: `${this.containerPath(alias)}/workspaces/${workspaceId}`,
       });
       return ok(undefined);
     } catch (e) {
+      // Already gone — surface as a typed not-found so discard stays idempotent (ADR 0011).
+      if (isNotFound(e)) return err(new WorkspaceNotFoundError(workspaceId));
       return err(e instanceof Error ? e : new Error('deleteWorkspace failed.'));
     }
   }

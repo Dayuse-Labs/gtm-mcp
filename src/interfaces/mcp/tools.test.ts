@@ -7,6 +7,7 @@ import { type ActorContext, type ResolvedActor } from '../../infrastructure/acto
 import { type MirrorWriter } from '../../application/use-cases/pull-container.js';
 import { type MirrorReader } from '../../domain/ports/mirror-reader.js';
 import { type Collaborator } from '../../domain/entities/collaborator.js';
+import { type Changeset } from '../../domain/entities/changeset.js';
 import {
   FakeGtmClient,
   emptyState,
@@ -36,15 +37,18 @@ interface Over {
   readonly identity?: Collaborator | null; // null ⇒ resolve fails + identify returns null (anon)
   readonly toolCalls?: InMemoryToolCallRepository;
   readonly notifier?: RecordingNotifier;
+  readonly gtm?: FakeGtmClient; // share one client so tests can toggle/observe it
+  readonly changesets?: InMemoryChangesetRepository;
 }
 
 function servicesWith(over: Over = {}): Services {
   const who = over.identity === undefined ? collaborator() : over.identity;
+  const gtm = over.gtm ?? new FakeGtmClient(emptyState());
   const actor: ActorContext = {
     resolve: (): Promise<Result<ResolvedActor>> =>
       who === null
         ? Promise.resolve(err(new Error('No collaborator is logged in.')))
-        : Promise.resolve(ok({ collaborator: who, gtm: new FakeGtmClient(emptyState()) })),
+        : Promise.resolve(ok({ collaborator: who, gtm })),
     identify: (): Promise<Collaborator | null> => Promise.resolve(who),
   };
   const mirror: MirrorWriter = { write: () => Promise.resolve(ok(undefined)) };
@@ -54,7 +58,7 @@ function servicesWith(over: Over = {}): Services {
     mirror,
     mirrorReader,
     previews: new InMemoryPreviewRepository(),
-    changesets: new InMemoryChangesetRepository(),
+    changesets: over.changesets ?? new InMemoryChangesetRepository(),
     toolCalls: over.toolCalls ?? new InMemoryToolCallRepository(),
     notifier: over.notifier ?? null,
     containers: { web: 'GTM-WEB', server: 'GTM-SRV' },
@@ -230,5 +234,84 @@ describe('google chat error push (ADR 0010)', () => {
 
     await vi.waitFor(() => expect(notifier.alerts).toHaveLength(1));
     expect(notifier.alerts[0]?.collaboratorEmail).toBeNull();
+  });
+});
+
+describe('reject (workspace discard, ADR 0011)', () => {
+  const CHANGESET_ID = '11111111-1111-1111-1111-111111111111';
+
+  function seededChangesets(over: Partial<Changeset> = {}): InMemoryChangesetRepository {
+    const repo = new InMemoryChangesetRepository();
+    repo.store.set(CHANGESET_ID, {
+      id: CHANGESET_ID,
+      authorId: 'author-1',
+      containerAlias: 'web',
+      planId: null,
+      status: 'applied',
+      operations: [],
+      summary: [],
+      beforeImages: null,
+      gtmWorkspaceId: 'ws-7',
+      ...over,
+    });
+    return repo;
+  }
+
+  it('discards the author’s own workspace and reconciles status to rejected', async () => {
+    const gtm = new FakeGtmClient(emptyState());
+    const changesets = seededChangesets();
+    const handlers = captureTools(servicesWith({ gtm, changesets, identity: collaborator() }));
+
+    const payload = (await callTool(handlers, 'reject', { changesetId: CHANGESET_ID })) as {
+      status: string;
+      alreadyGone: boolean;
+    };
+
+    expect(payload.status).toBe('rejected');
+    expect(payload.alreadyGone).toBe(false);
+    expect(gtm.calls.some((c) => c.op === 'deleteWorkspace' && c.id === 'ws-7')).toBe(true);
+    expect(changesets.store.get(CHANGESET_ID)?.status).toBe('rejected');
+  });
+
+  it('forbids a non-author, non-admin caller', async () => {
+    const gtm = new FakeGtmClient(emptyState());
+    const changesets = seededChangesets();
+    const handlers = captureTools(
+      servicesWith({ gtm, changesets, identity: collaborator({ id: 'someone-else' }) }),
+    );
+
+    const res = await rawCall(handlers, 'reject', { changesetId: CHANGESET_ID });
+
+    expect(res.isError).toBe(true);
+    const first = res.content[0];
+    expect(first?.type === 'text' ? first.text : '').toContain('forbidden');
+    expect(gtm.calls.some((c) => c.op === 'deleteWorkspace')).toBe(false);
+  });
+
+  it('treats an already-gone workspace as success', async () => {
+    const gtm = new FakeGtmClient(emptyState());
+    gtm.failDeleteWorkspace = 'notFound';
+    const changesets = seededChangesets();
+    const handlers = captureTools(servicesWith({ gtm, changesets, identity: collaborator() }));
+
+    const payload = (await callTool(handlers, 'reject', { changesetId: CHANGESET_ID })) as {
+      status: string;
+      alreadyGone: boolean;
+    };
+
+    expect(payload.status).toBe('rejected');
+    expect(payload.alreadyGone).toBe(true);
+  });
+
+  it('surfaces a real delete failure as an error', async () => {
+    const gtm = new FakeGtmClient(emptyState());
+    gtm.failDeleteWorkspace = 'error';
+    const changesets = seededChangesets();
+    const handlers = captureTools(servicesWith({ gtm, changesets, identity: collaborator() }));
+
+    const res = await rawCall(handlers, 'reject', { changesetId: CHANGESET_ID });
+
+    expect(res.isError).toBe(true);
+    expect(changesets.store.get(CHANGESET_ID)?.status).toBe('applied');
   });
 });

@@ -27,6 +27,18 @@ export interface GtmWorkspaceRef {
 }
 
 /**
+ * The workspace GTM was asked to delete no longer exists (HTTP 404). Surfaced as a typed
+ * error so discard can treat an already-gone workspace as success (idempotent cleanup, ADR 0011),
+ * distinct from a permission/other failure which must surface as an error.
+ */
+export class WorkspaceNotFoundError extends Error {
+  constructor(workspaceId: string) {
+    super(`GTM workspace ${workspaceId} no longer exists.`);
+    this.name = 'WorkspaceNotFoundError';
+  }
+}
+
+/**
  * Port over the Google Tag Manager API v2, scoped to one collaborator's OAuth token.
  * Implemented in infrastructure. Write paths target an ephemeral workspace (ADR 0005)
  * and NEVER publish (no publish scope — ADR 0003).
@@ -46,7 +58,14 @@ export interface GtmClient {
 
   // --- write paths (apply only) ---
   createWorkspace(container: ContainerAlias, name: string): Promise<Result<GtmWorkspaceRef>>;
-  deleteWorkspace(container: ContainerAlias, workspaceId: string): Promise<Result<void>>;
+  /**
+   * Delete a workspace. A 404 (workspace already gone) is surfaced as a typed
+   * {@link WorkspaceNotFoundError} so callers can treat it as idempotent success (ADR 0011).
+   */
+  deleteWorkspace(
+    container: ContainerAlias,
+    workspaceId: string,
+  ): Promise<Result<void, WorkspaceNotFoundError | Error>>;
   createEntity(
     workspace: GtmWorkspaceRef,
     kind: EntityType,

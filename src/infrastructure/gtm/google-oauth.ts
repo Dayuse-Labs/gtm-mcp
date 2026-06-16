@@ -3,10 +3,22 @@ import { type Result, ok, err } from '../../shared/result.js';
 
 export type OAuth2Client = InstanceType<typeof google.auth.OAuth2>;
 
-/** Scopes requested — edit + readonly, NEVER publish (ADR 0003). */
+/**
+ * Scopes requested — edit + readonly + delete.containers, NEVER publish (ADR 0003, 0011).
+ *
+ * `delete.containers` is needed to DISCARD an agent-created ephemeral workspace
+ * (workspace-discard / rollback cleanup, ADR 0011). It does NOT grant publish.
+ *
+ * RE-CONSENT REQUIRED: this scope is NOT present in already-issued tokens, so existing
+ * collaborators must re-run `/oauth/login` to re-consent before they (or an admin acting
+ * on their behalf) can discard a workspace. Tokens granted before this change keep working
+ * for every other tool but will 403 on workspace deletion until re-consent.
+ */
 export const GTM_SCOPES = [
   'https://www.googleapis.com/auth/tagmanager.edit.containers',
   'https://www.googleapis.com/auth/tagmanager.readonly',
+  // discard an agent-created ephemeral workspace — NOT publish (ADR 0011)
+  'https://www.googleapis.com/auth/tagmanager.delete.containers',
   // identity, to read the user's email/sub for attribution
   'openid',
   'email',
