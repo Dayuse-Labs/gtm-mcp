@@ -1,0 +1,22 @@
+# Local Postgres for development (dayuse-vibes: first-party DB only, no third-party DBaaS).
+# Credentials match the dummy DATABASE_URL in .env.local: postgres://u:p@localhost:5432/gtm
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: gtm-postgres
+    environment:
+      POSTGRES_USER: u
+      POSTGRES_PASSWORD: p
+      POSTGRES_DB: gtm
+    ports:
+      - '5432:5432'
+    volumes:
+      - gtm-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U u -d gtm']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  gtm-pgdata:

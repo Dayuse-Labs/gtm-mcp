@@ -1,0 +1,344 @@
+import { z } from 'zod';
+import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { ContainerAliasSchema } from '../../domain/value-objects/container-alias.js';
+import { EntityTypeSchema, OperationsSchema } from '../../domain/value-objects/operation.js';
+import { type ActorContext } from '../../infrastructure/actor/actor-context.js';
+import { type MirrorWriter } from '../../application/use-cases/pull-container.js';
+import { type MirrorReader } from '../../domain/ports/mirror-reader.js';
+import { type PreviewRepository } from '../../domain/repositories/preview-repository.js';
+import { type ChangesetRepository } from '../../domain/repositories/changeset-repository.js';
+import { getIdentity } from '../../application/use-cases/get-identity.js';
+import { pullContainer } from '../../application/use-cases/pull-container.js';
+import { exportContainer } from '../../application/use-cases/export-container.js';
+import { searchContainer } from '../../application/use-cases/search-container.js';
+import { previewChangeset } from '../../application/use-cases/preview-changeset.js';
+import {
+  applyChangeset,
+  GTM_WORKSPACE_LIMIT,
+} from '../../application/use-cases/apply-changeset.js';
+import { findExisting } from '../../domain/services/state-query.js';
+
+const ChangesetStatusSchema = z.enum(['draft', 'previewed', 'applied', 'rejected', 'published']);
+
+export interface Services {
+  readonly actor: ActorContext;
+  readonly mirror: MirrorWriter;
+  readonly mirrorReader: MirrorReader;
+  readonly previews: PreviewRepository;
+  readonly changesets: ChangesetRepository;
+  readonly containers: { readonly web: string; readonly server: string };
+  readonly now: () => Date;
+  readonly newId: () => string;
+  readonly previewTtlHours: number;
+}
+
+const text = (o: unknown): CallToolResult => ({
+  content: [{ type: 'text', text: typeof o === 'string' ? o : JSON.stringify(o, null, 2) }],
+});
+const fail = (msg: string): CallToolResult => ({
+  content: [{ type: 'text', text: msg }],
+  isError: true,
+});
+
+export function registerTools(server: McpServer, s: Services): void {
+  // ---------- Read / discovery ----------
+  server.registerTool(
+    'list_containers',
+    {
+      description: 'List the registered web/server containers and their GTM ids.',
+      inputSchema: {},
+    },
+    () => text({ web: s.containers.web, server: s.containers.server }),
+  );
+
+  server.registerTool(
+    'whoami',
+    { description: 'Return the current collaborator and their GTM access.', inputSchema: {} },
+    async () => {
+      const a = await s.actor.resolve();
+      if (!a.success) return fail(a.error.message);
+      const v = await getIdentity({ gtm: a.data.gtm }, a.data.collaborator);
+      return v.success ? text(v.data) : fail(v.error.message);
+    },
+  );
+
+  server.registerTool(
+    'pull',
+    {
+      description: 'Refresh the local mirror from GTM and return a change summary.',
+      inputSchema: { container: ContainerAliasSchema },
+    },
+    async (args) => {
+      const a = await s.actor.resolve();
+      if (!a.success) return fail(a.error.message);
+      const v = await pullContainer({ gtm: a.data.gtm, mirror: s.mirror }, args.container);
+      return v.success ? text(v.data) : fail(v.error.message);
+    },
+  );
+
+  server.registerTool(
+    'list_entities',
+    {
+      description:
+        'List entities of a type in a container (optionally filtered by name substring).',
+      inputSchema: {
+        container: ContainerAliasSchema,
+        type: EntityTypeSchema,
+        filter: z.string().max(200).optional(),
+      },
+    },
+    async (args) => {
+      const a = await s.actor.resolve();
+      if (!a.success) return fail(a.error.message);
+      const pulled = await a.data.gtm.pull(args.container);
+      if (!pulled.success) return fail(pulled.error.message);
+      const f = args.filter?.toLowerCase();
+      const rows = (pulled.data[args.type] ?? [])
+        .filter((e) => (f ? e.name.toLowerCase().includes(f) : true))
+        .map((e) => ({ id: e.id, name: e.name }));
+      return text({ type: args.type, count: rows.length, entities: rows });
+    },
+  );
+
+  server.registerTool(
+    'get_entity',
+    {
+      description: 'Get one entity (full GTM JSON) by name or id.',
+      inputSchema: {
+        container: ContainerAliasSchema,
+        type: EntityTypeSchema,
+        ref: z.string().min(1).max(255),
+      },
+    },
+    async (args) => {
+      const a = await s.actor.resolve();
+      if (!a.success) return fail(a.error.message);
+      const pulled = await a.data.gtm.pull(args.container);
+      if (!pulled.success) return fail(pulled.error.message);
+      const found = findExisting(pulled.data, args.type, { id: args.ref, name: args.ref });
+      return found.success ? text(found.data.raw) : fail(found.error.message);
+    },
+  );
+
+  server.registerTool(
+    'get_examples',
+    {
+      description:
+        'Representative valid examples of an entity type for clone-from-example authoring.',
+      inputSchema: { container: ContainerAliasSchema, type: EntityTypeSchema },
+    },
+    async (args) => {
+      const a = await s.actor.resolve();
+      if (!a.success) return fail(a.error.message);
+      const v = await a.data.gtm.getExamples(args.container, args.type);
+      return v.success ? text(v.data.map((e) => e.raw)) : fail(v.error.message);
+    },
+  );
+
+  server.registerTool(
+    'export_container',
+    {
+      description:
+        'Export the WHOLE container from the local mirror in ONE call (zero GTM API calls). mode=compact (default) keeps ids/names/types plus condition & reference fields and omits bulky blobs (tag html, custom-template code) behind {_omitted,length} markers; mode=full returns raw bodies verbatim. Prefer this over fetching entities one-by-one. Run pull first if the mirror is empty.',
+      inputSchema: {
+        container: ContainerAliasSchema,
+        mode: z.enum(['compact', 'full']).optional(),
+      },
+    },
+    async (args) => {
+      const v = await exportContainer(
+        { mirror: s.mirrorReader },
+        args.container,
+        args.mode ?? 'compact',
+      );
+      return v.success ? text(v.data) : fail(v.error.message);
+    },
+  );
+
+  server.registerTool(
+    'search_container',
+    {
+      description:
+        'Search the local mirror (zero GTM API calls) for every entity whose full JSON contains the query string, case-insensitive. Finds entities that CARRY a value (e.g. a trigger condition equal to "daypass"), not just ones named for it — use this instead of fetching entities one-by-one. Returns matches with full bodies and which fields matched. Run pull first if the mirror is empty.',
+      inputSchema: { container: ContainerAliasSchema, query: z.string().min(1).max(200) },
+    },
+    async (args) => {
+      const v = await searchContainer({ mirror: s.mirrorReader }, args.container, args.query);
+      return v.success ? text(v.data) : fail(v.error.message);
+    },
+  );
+
+  server.registerTool(
+    'workspace_status',
+    {
+      description:
+        'Report the LIVE GTM workspace count vs the per-container limit (3, incl. Default). slotsFree reflects GTM reality (counts workspaces created in the UI too); pendingChangesets is our informational tally.',
+      inputSchema: { container: ContainerAliasSchema },
+    },
+    async (args) => {
+      const a = await s.actor.resolve();
+      if (!a.success) return fail(a.error.message);
+      const ws = await a.data.gtm.countWorkspaces(args.container);
+      const pending = await s.changesets.countPending(args.container);
+      if (!ws.success) return fail(ws.error.message);
+      if (!pending.success) return fail(pending.error.message);
+      return text({
+        container: args.container,
+        gtmWorkspaces: ws.data,
+        limit: GTM_WORKSPACE_LIMIT,
+        slotsFree: Math.max(0, GTM_WORKSPACE_LIMIT - ws.data),
+        pendingChangesets: pending.data,
+      });
+    },
+  );
+
+  server.registerTool(
+    'list_changesets',
+    {
+      description: 'List changesets, optionally filtered by container/status.',
+      inputSchema: {
+        container: ContainerAliasSchema.optional(),
+        status: ChangesetStatusSchema.optional(),
+      },
+    },
+    async (args) => {
+      const v = await s.changesets.list({ container: args.container, status: args.status });
+      if (!v.success) return fail(v.error.message);
+      return text(
+        v.data.map((c) => ({
+          id: c.id,
+          container: c.containerAlias,
+          status: c.status,
+          ops: c.operations.length,
+          workspace: c.gtmWorkspaceId,
+        })),
+      );
+    },
+  );
+
+  server.registerTool(
+    'get_changeset',
+    {
+      description: 'Get a changeset with its operations, status and before-images.',
+      inputSchema: { id: z.string().uuid() },
+    },
+    async (args) => {
+      const v = await s.changesets.findById(args.id);
+      if (!v.success) return fail(v.error.message);
+      return v.data ? text(v.data) : fail('Changeset not found.');
+    },
+  );
+
+  // ---------- Write / workflow ----------
+  server.registerTool(
+    'preview',
+    {
+      description:
+        'Phase 1 of Apply: validate + drift-check a changeset, return a plain-language summary, dependency impacts, and a previewId.',
+      inputSchema: { container: ContainerAliasSchema, operations: OperationsSchema },
+    },
+    async (args) => {
+      const a = await s.actor.resolve();
+      if (!a.success) return fail(a.error.message);
+      const v = await previewChangeset(
+        {
+          gtm: a.data.gtm,
+          previews: s.previews,
+          now: s.now,
+          newId: s.newId,
+          previewTtlHours: s.previewTtlHours,
+        },
+        { author: a.data.collaborator, container: args.container, operations: args.operations },
+      );
+      if (!v.success) return fail(v.error.message);
+      return text({
+        previewId: v.data.id,
+        container: v.data.container,
+        summary: v.data.summary,
+        impacts: v.data.impacts,
+        expiresAt: v.data.expiresAt,
+      });
+    },
+  );
+
+  server.registerTool(
+    'apply',
+    {
+      description:
+        'Phase 2 of Apply: write a previewed changeset into a fresh ephemeral GTM workspace. Never publishes.',
+      inputSchema: { previewId: z.string().uuid() },
+    },
+    async (args) => {
+      const a = await s.actor.resolve();
+      if (!a.success) return fail(a.error.message);
+      const v = await applyChangeset(
+        {
+          gtm: a.data.gtm,
+          previews: s.previews,
+          changesets: s.changesets,
+          now: s.now,
+          newId: s.newId,
+        },
+        a.data.collaborator,
+        args.previewId,
+      );
+      return v.success ? text(v.data) : fail(`[${v.error.code}] ${v.error.message}`);
+    },
+  );
+
+  server.registerTool(
+    'reject',
+    {
+      description: 'Reject a pending changeset and delete its workspace, freeing a slot.',
+      inputSchema: { changesetId: z.string().uuid() },
+    },
+    async (args) => {
+      const a = await s.actor.resolve();
+      if (!a.success) return fail(a.error.message);
+      const found = await s.changesets.findById(args.changesetId);
+      if (!found.success) return fail(found.error.message);
+      const cs = found.data;
+      if (cs === null) return fail('Changeset not found.');
+      if (cs.gtmWorkspaceId !== null) {
+        const del = await a.data.gtm.deleteWorkspace(cs.containerAlias, cs.gtmWorkspaceId);
+        if (!del.success) return fail(`Could not delete workspace: ${del.error.message}`);
+      }
+      const saved = await s.changesets.save({ ...cs, status: 'rejected' });
+      return saved.success
+        ? text({ changesetId: cs.id, status: 'rejected' })
+        : fail(saved.error.message);
+    },
+  );
+
+  server.registerTool(
+    'inverse',
+    {
+      description:
+        'Generate an inverse changeset from before-images (post-publish rollback helper).',
+      inputSchema: { changesetId: z.string().uuid() },
+    },
+    () =>
+      text(
+        '[inverse] deferred — not part of this slice. Post-publish rollback: use GTM "publish previous version" for now (ADR 0006).',
+      ),
+  );
+}
+
+export const TOOL_NAMES = [
+  'list_containers',
+  'whoami',
+  'pull',
+  'list_entities',
+  'get_entity',
+  'get_examples',
+  'export_container',
+  'search_container',
+  'workspace_status',
+  'list_changesets',
+  'get_changeset',
+  'preview',
+  'apply',
+  'reject',
+  'inverse',
+] as const;

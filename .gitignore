@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+*.log
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Disposable GTM mirror cache (ADR 0001 — derived, never tracked)
+.cache/
