@@ -46,6 +46,8 @@ GTM's API quota is tight (~3-5 calls/min). Work from the mirror, not the live AP
    - `preview` — validate + return impacts. READ the impacts before applying.
    - `apply` — writes to a fresh workspace for human review. Check `workspace_status` first (per-container pending cap).
 5. **Never publish** — you can't, by design. The human reviews + publishes in the GTM UI.
+6. **Change client + server together.** A tracking change usually spans both containers (web emits/forwards a value; sGTM consumes it / sends onward). Author the web changeset AND its server counterpart in the same pass and `preview` both, so the full `dataLayer → sGTM → tag` flow exists at once and is testable **end-to-end in one GTM Preview session**. Never ship a client-only or server-only half-state — it can't be validated and risks a live gap. (Still one changeset/workspace per container — pair them, preview both, publish both.)
+7. **Reuse a signal's established name across containers** — forward/read it under its existing client-side name (e.g. `didConsentToFacebook`), don't coin a server-side synonym. See `docs/gtm/conventions.md`.
 
 ## Source of truth + documentation loop
 
