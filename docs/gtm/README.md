@@ -21,6 +21,7 @@ Drill order: read this map → if the task touches dataLayer, orient from the ch
 - [containers.md](containers.md) — containers, accounts, environments. _(operator-amends)_
 - [conventions.md](conventions.md) — naming and structure conventions. _(operator-amends)_
 - [dataLayer.md](dataLayer.md) — **dataLayer bindings**: catalog ⇄ GTM mapping. _(operator-amends; the catalog itself is the MCP tools, not a file)_
+- [facebook-tracking.md](facebook-tracking.md) — **Meta Pixel + Conversions API**: conversions ⇄ event names, dedup contract, `user_data`, consent gating. _(operator-amends; design in [ADR 0011](../adr/0011-meta-capi-internal.md))_
 
 ## How to contribute
 
