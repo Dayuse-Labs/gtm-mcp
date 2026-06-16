@@ -10,6 +10,7 @@ import { type DatalayerCatalog } from '../../domain/ports/datalayer-catalog.js';
 import { type PreviewRepository } from '../../domain/repositories/preview-repository.js';
 import { type ChangesetRepository } from '../../domain/repositories/changeset-repository.js';
 import { type ToolCallRepository } from '../../domain/repositories/tool-call-repository.js';
+import { type Notifier } from '../../domain/ports/notifier.js';
 import { isAdmin } from '../../domain/entities/collaborator.js';
 import { getIdentity } from '../../application/use-cases/get-identity.js';
 import { pullContainer } from '../../application/use-cases/pull-container.js';
@@ -31,6 +32,7 @@ export interface Services {
   readonly previews: PreviewRepository;
   readonly changesets: ChangesetRepository;
   readonly toolCalls: ToolCallRepository;
+  readonly notifier: Notifier | null;
   readonly containers: { readonly web: string; readonly server: string };
   readonly now: () => Date;
   readonly newId: () => string;
@@ -105,13 +107,14 @@ const recordCall = (
   durationMs: number,
 ): void => {
   void (async () => {
+    const who = await s.actor.identify().catch(() => null);
+    const container = containerOf(args);
     try {
-      const who = await s.actor.identify();
       await s.toolCalls.record({
         collaboratorId: who?.id ?? null,
         sessionId: sessionIdOf(extra),
         tool,
-        container: containerOf(args),
+        container,
         outcome,
         errorMessage,
         durationMs,
@@ -120,6 +123,21 @@ const recordCall = (
       });
     } catch (e) {
       console.error(`[tool-call-log] record failed for ${tool}:`, e);
+    }
+    // "Is everything going right" push (ADR 0010): alert on failures only.
+    // Independent of the log write so neither failure suppresses the other.
+    if (outcome === 'error' && s.notifier !== null) {
+      try {
+        await s.notifier.notifyToolError({
+          tool,
+          collaboratorEmail: who?.email ?? null,
+          container,
+          errorMessage: errorMessage ?? 'unknown error',
+          at: s.now(),
+        });
+      } catch (e) {
+        console.error(`[tool-call-log] alert failed for ${tool}:`, e);
+      }
     }
   })();
 };
@@ -139,10 +157,26 @@ const wrapWithLogging = <InputArgs extends z.ZodRawShape>(
     try {
       const result = await run(args, extra);
       const outcome = result.isError === true ? 'error' : 'ok';
-      recordCall(s, tool, args, extra, outcome, outcome === 'error' ? firstText(result) : null, Date.now() - start);
+      recordCall(
+        s,
+        tool,
+        args,
+        extra,
+        outcome,
+        outcome === 'error' ? firstText(result) : null,
+        Date.now() - start,
+      );
       return result;
     } catch (e) {
-      recordCall(s, tool, args, extra, 'error', e instanceof Error ? e.message : String(e), Date.now() - start);
+      recordCall(
+        s,
+        tool,
+        args,
+        extra,
+        'error',
+        e instanceof Error ? e.message : String(e),
+        Date.now() - start,
+      );
       throw e;
     }
   };

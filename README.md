@@ -64,7 +64,7 @@ npm run verify               # lint:fix + format + typecheck + test
 
 ## RGPD note
 
-We store collaborator **emails** (personal data) and encrypted OAuth tokens in Postgres. Railway is a US-operated host: choose an **EU region**, ensure a **DPA** is in place, and keep `TOKEN_ENCRYPTION_KEY` in Railway secrets. Tokens are AES-256-GCM encrypted at rest (ADR 0003).
+We store collaborator **emails** (personal data) and encrypted OAuth tokens in Postgres. Railway is a US-operated host: choose an **EU region**, ensure a **DPA** is in place, and keep `TOKEN_ENCRYPTION_KEY` in Railway secrets. Tokens are AES-256-GCM encrypted at rest (ADR 0003). The **tool-call log** (ADR 0010) records per-call usage/health with a sanitized arg summary only (no raw bodies), links to a collaborator by id with `ON DELETE SET NULL`, and is bounded by `TOOL_CALL_RETENTION_DAYS` (default 90) — data minimisation.
 
 ## Infrastructure (Railway — Inno Labs workspace)
 
@@ -84,15 +84,17 @@ App service vars set: `NODE_ENV=production`, `DATABASE_URL=${{Postgres.DATABASE_
 - Google OAuth federation (`/oauth/login`, `/oauth/callback`) + AES-256-GCM token encryption at rest.
 - `GtmClient` over `googleapis` (pull, examples, workspace count, workspace + entity writes).
 - Postgres repositories (collaborator, oauth token, changeset, preview) + migration runner.
-- Real tools: `whoami`, `pull`, `list_entities`, `get_entity`, `get_examples`, `export_container`, `search_container`, `workspace_status`, `list_changesets`, `get_changeset`, `preview`, `apply`, `reject`, `list_containers`, `list_datalayer_events`, `get_datalayer_event`, `get_datalayer_type`.
+- Real tools: `whoami`, `pull`, `list_entities`, `get_entity`, `get_examples`, `export_container`, `search_container`, `workspace_status`, `list_changesets`, `get_changeset`, `preview`, `apply`, `reject`, `list_containers`, `usage_stats`, `list_datalayer_events`, `get_datalayer_event`, `get_datalayer_type`.
 - `export_container` / `search_container` read the local mirror only (zero GTM API calls) — `export_container` dumps the whole container in one call (compact mode omits html/template blobs), `search_container` finds entities that carry a value (e.g. a condition `== daypass`), not just by name. Pull once, then query the mirror freely without touching GTM's tight quota.
 - Two-phase `preview` → `apply`: validation, fail-on-drift (fingerprints), rename/template **dependency impacts**, cap-guard, ephemeral workspace, before-images. Never publishes.
 - **dataLayer catalog** (ADR 0008): `list_datalayer_events` / `get_datalayer_event` / `get_datalayer_type` serve the authoritative upstream schema, fetched live from GitLab (API v4 + granular `read_repository` token), cached with a TTL + `.cache/datalayer/` disk fallback, returned as **compacted slices** (fat string-unions collapsed; referenced types kept as names / pulled on demand). Degrades gracefully when unconfigured or on a failed refresh; never blocks GTM work.
+- **Tool-call log** (ADR 0010): a central `withLogging` wrapper records EVERY MCP tool call (reads + writes) to `tool_call` — collaborator, tool, container, outcome, error, duration — fire-and-forget so it never slows or fails a call. Admin-only `usage_stats` rolls up usage-per-collaborator + error rate over a window. Sanitized args only (no raw bodies).
+- **Error-alert push** (ADR 0010): every failed tool call also pushes to a Google Chat space (`GOOGLE_CHAT_WEBHOOK_URL`) via a `Notifier` port + `GoogleChatNotifier` — the "is everything going right" signal. Deduplicated by (tool + message) on a 5-min cooldown so a looping failure fires once; off the request path and swallowed, so a webhook outage never affects a call. No webhook configured ⇒ logging still works, alerts are skipped.
 
 ## Still stubbed / deferred
 
 1. **Real MCP-transport OAuth** — dev resolves identity from the last `/oauth/login` (single-user). Production `/mcp` fails closed (501) until per-request transport auth is wired.
 2. **`inverse`** tool (post-publish rollback helper) — returns a deferral pointer; use GTM "publish previous version" for now.
 3. **Live apply** — exercised against live GTM (web workspace applied + verified via before-image diff). Cross-container (web + server) apply still being validated.
-4. **Google Chat webhook + pending-changeset TTL job** (Q18).
+4. **Pending-changeset TTL job** (Q18) — a scheduled sweep that rejects stuck pending changesets (frees a workspace slot) and purges `tool_call` rows older than `TOOL_CALL_RETENTION_DAYS` (ADR 0010). _(The Google Chat webhook itself is now wired — see error-alert push above.)_
 5. **Changeset-status reconciliation** — the cap-guard and `workspace_status` now derive from the **live GTM workspace count** (`countWorkspaces`), so human publish/delete and UI-created workspaces no longer cause phantom slots, and the cap matches GTM's real 3-workspace limit. Still deferred: auto-marking a changeset `published` when its workspace is published in the UI (its DB status stays `applied`), and `reject` gracefully reconciling an already-gone workspace instead of erroring.

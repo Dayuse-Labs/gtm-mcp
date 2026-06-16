@@ -17,6 +17,7 @@ import {
   type ToolCallRecord,
   type UsageRollup,
 } from '../domain/repositories/tool-call-repository.js';
+import { type Notifier, type ToolErrorAlert } from '../domain/ports/notifier.js';
 import { type Result, ok } from '../shared/result.js';
 
 export function emptyState(): ContainerState {
@@ -188,6 +189,14 @@ export class InMemoryToolCallRepository implements ToolCallRepository {
       avgDurationMs: Math.round(g.sum / g.calls),
     }));
     return Promise.resolve(ok(rows));
+  }
+}
+
+export class RecordingNotifier implements Notifier {
+  public alerts: ToolErrorAlert[] = [];
+  notifyToolError(alert: ToolErrorAlert): Promise<void> {
+    this.alerts.push(alert);
+    return Promise.resolve();
   }
 }
 
