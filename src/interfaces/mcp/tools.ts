@@ -21,6 +21,7 @@ import {
   applyChangeset,
   GTM_WORKSPACE_LIMIT,
 } from '../../application/use-cases/apply-changeset.js';
+import { discardWorkspace } from '../../application/use-cases/discard-workspace.js';
 import { findExisting } from '../../domain/services/state-query.js';
 
 const ChangesetStatusSchema = z.enum(['draft', 'previewed', 'applied', 'rejected', 'published']);
@@ -444,24 +445,19 @@ export function registerTools(server: McpServer, s: Services): void {
   reg(
     'reject',
     {
-      description: 'Reject a pending changeset and delete its workspace, freeing a slot.',
+      description:
+        'Discard a changeset YOU created (or, as admin, anyone’s): delete its ephemeral GTM workspace, free a slot, and mark it rejected. Idempotent — if the workspace is already gone the changeset is still reconciled. Requires the delete.containers scope (re-run /oauth/login if you consented before this shipped).',
       inputSchema: { changesetId: z.string().uuid() },
     },
     async (args) => {
       const a = await s.actor.resolve();
       if (!a.success) return fail(a.error.message);
-      const found = await s.changesets.findById(args.changesetId);
-      if (!found.success) return fail(found.error.message);
-      const cs = found.data;
-      if (cs === null) return fail('Changeset not found.');
-      if (cs.gtmWorkspaceId !== null) {
-        const del = await a.data.gtm.deleteWorkspace(cs.containerAlias, cs.gtmWorkspaceId);
-        if (!del.success) return fail(`Could not delete workspace: ${del.error.message}`);
-      }
-      const saved = await s.changesets.save({ ...cs, status: 'rejected' });
-      return saved.success
-        ? text({ changesetId: cs.id, status: 'rejected' })
-        : fail(saved.error.message);
+      const v = await discardWorkspace(
+        { gtm: a.data.gtm, changesets: s.changesets },
+        a.data.collaborator,
+        args.changesetId,
+      );
+      return v.success ? text(v.data) : fail(`[${v.error.code}] ${v.error.message}`);
     },
   );
 

@@ -3,6 +3,7 @@ import {
   type GtmEntitySnapshot,
   type GtmWorkspaceRef,
   type ContainerState,
+  WorkspaceNotFoundError,
 } from '../domain/ports/gtm-client.js';
 import { type ContainerAlias } from '../domain/value-objects/container-alias.js';
 import { type EntityType } from '../domain/value-objects/operation.js';
@@ -18,7 +19,7 @@ import {
   type UsageRollup,
 } from '../domain/repositories/tool-call-repository.js';
 import { type Notifier, type ToolErrorAlert } from '../domain/ports/notifier.js';
-import { type Result, ok } from '../shared/result.js';
+import { type Result, ok, err } from '../shared/result.js';
 
 export function emptyState(): ContainerState {
   const s: Partial<Record<EntityType, readonly GtmEntitySnapshot[]>> = {};
@@ -57,6 +58,9 @@ export interface RecordedCall {
 
 export class FakeGtmClient implements GtmClient {
   public calls: RecordedCall[] = [];
+  /** When 'notFound', deleteWorkspace returns WorkspaceNotFoundError (already-gone case);
+   *  when 'error', a generic failure (permission/other); when false, it succeeds. */
+  public failDeleteWorkspace: false | 'notFound' | 'error' = false;
   private idSeq = 0;
 
   constructor(
@@ -82,8 +86,15 @@ export class FakeGtmClient implements GtmClient {
       ok({ id: 'ws-new', name, path: 'accounts/a/containers/c/workspaces/ws-new' }),
     );
   }
-  deleteWorkspace(_c: ContainerAlias, id: string): Promise<Result<void>> {
+  deleteWorkspace(
+    _c: ContainerAlias,
+    id: string,
+  ): Promise<Result<void, WorkspaceNotFoundError | Error>> {
     this.calls.push({ op: 'deleteWorkspace', id });
+    if (this.failDeleteWorkspace === 'notFound')
+      return Promise.resolve(err(new WorkspaceNotFoundError(id)));
+    if (this.failDeleteWorkspace === 'error')
+      return Promise.resolve(err(new Error('insufficient permissions to delete workspace')));
     return Promise.resolve(ok(undefined));
   }
   createEntity(
