@@ -14,11 +14,13 @@ import { PgOAuthTokenRepository } from './infrastructure/repositories/pg-oauth-t
 import { PgChangesetRepository } from './infrastructure/repositories/pg-changeset-repository.js';
 import { PgPreviewRepository } from './infrastructure/repositories/pg-preview-repository.js';
 import { FileMirror } from './infrastructure/mirror/file-mirror.js';
+import { GitlabDatalayerCatalog } from './infrastructure/gtm/gitlab-datalayer-catalog.js';
 import { DevActorContext } from './infrastructure/actor/actor-context.js';
 import { buildOAuthRouter } from './interfaces/http/oauth-routes.js';
 import { requireAuth } from './interfaces/http/require-auth.js';
 import { buildMcpServer } from './interfaces/mcp/server.js';
 import { type Services } from './interfaces/mcp/tools.js';
+import { resolveMinSkillVersion } from './shared/version.js';
 
 const env = loadEnv();
 
@@ -40,6 +42,13 @@ const tokens = new PgOAuthTokenRepository(pool, cipher);
 const changesets = new PgChangesetRepository(pool);
 const previews = new PgPreviewRepository(pool);
 const fileMirror = new FileMirror();
+const catalog =
+  env.GITLAB_TOKEN !== undefined && env.GITLAB_CATALOG_PROJECT_ID !== undefined
+    ? new GitlabDatalayerCatalog({
+        token: env.GITLAB_TOKEN,
+        projectId: env.GITLAB_CATALOG_PROJECT_ID,
+      })
+    : null;
 const services: Services = {
   actor: new DevActorContext(collaborators, tokens, oauth, cfg),
   mirror: fileMirror,
@@ -50,6 +59,8 @@ const services: Services = {
   now: () => new Date(),
   newId: () => randomUUID(),
   previewTtlHours: 24,
+  catalog,
+  minSkillVersion: resolveMinSkillVersion(env.MIN_SKILL_VERSION),
 };
 
 const app = express();

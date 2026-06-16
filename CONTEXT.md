@@ -78,6 +78,16 @@ _Avoid_: template (ambiguous with gallery), CVT
 A template whose code is owned upstream in the community gallery. Instantiated by the agent but never rewritten — editing its code would detach it from the gallery.
 _Avoid_: community template
 
+### dataLayer
+
+**dataLayer catalog**:
+The authoritative, upstream-generated schema of every dataLayer event the site can emit — event names, property paths, and value enums. Read-only and served by the MCP catalog tools; never vendored or hand-edited.
+_Avoid_: schema, types, events file, catalogue
+
+**dataLayer bindings**:
+The verified mapping from dataLayer events/properties to the GTM entities that consume them. Hand-grown in `docs/gtm`; references the dataLayer catalog for what is real.
+_Avoid_: dataLayer doc, mapping table
+
 ### Actors
 
 **Collaborator**:

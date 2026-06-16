@@ -1,12 +1,12 @@
-# dataLayer
+# dataLayer bindings
 
-> Living doc — amended by the `gtm-mcp` skill.
-
-The dynamic catalogue of dataLayer events and properties. Add an entry whenever you verify one from a container or the site.
+> **Source of truth:** GTM (for wiring) + the dataLayer catalog (for what's real) · **Mutability:** operator-amends · **Audience:** operator / repo agent
+>
+> This is the **bindings** layer: which GTM entity references which dataLayer event/property, verified in-container. It does **not** enumerate what events exist — the **dataLayer catalog** (authoritative, upstream-generated) owns that and is served by the MCP tools `list_datalayer_events` / `get_datalayer_event` / `get_datalayer_type`. The catalog is read-only — never vendor or amend it ("do not edit by hand"). Record only verified catalog→GTM wiring here.
 
 ## How to add an entry
 
-Append a row with the fact you verified (name, where observed, notes). Keep it factual; don't duplicate.
+Append a row with the binding you verified (catalog event/property ⇄ GTM entity, where observed, notes). Confirm the event/property against the catalog first. Keep it factual; don't duplicate.
 
 ## Events
 

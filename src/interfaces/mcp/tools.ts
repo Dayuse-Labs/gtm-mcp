@@ -6,6 +6,7 @@ import { EntityTypeSchema, OperationsSchema } from '../../domain/value-objects/o
 import { type ActorContext } from '../../infrastructure/actor/actor-context.js';
 import { type MirrorWriter } from '../../application/use-cases/pull-container.js';
 import { type MirrorReader } from '../../domain/ports/mirror-reader.js';
+import { type DatalayerCatalog } from '../../domain/ports/datalayer-catalog.js';
 import { type PreviewRepository } from '../../domain/repositories/preview-repository.js';
 import { type ChangesetRepository } from '../../domain/repositories/changeset-repository.js';
 import { getIdentity } from '../../application/use-cases/get-identity.js';
@@ -31,6 +32,8 @@ export interface Services {
   readonly now: () => Date;
   readonly newId: () => string;
   readonly previewTtlHours: number;
+  readonly catalog: DatalayerCatalog | null;
+  readonly minSkillVersion: string;
 }
 
 const text = (o: unknown): CallToolResult => ({
@@ -59,7 +62,9 @@ export function registerTools(server: McpServer, s: Services): void {
       const a = await s.actor.resolve();
       if (!a.success) return fail(a.error.message);
       const v = await getIdentity({ gtm: a.data.gtm }, a.data.collaborator);
-      return v.success ? text(v.data) : fail(v.error.message);
+      return v.success
+        ? text({ ...v.data, minSkillVersion: s.minSkillVersion })
+        : fail(v.error.message);
     },
   );
 
@@ -323,6 +328,55 @@ export function registerTools(server: McpServer, s: Services): void {
         '[inverse] deferred — not part of this slice. Post-publish rollback: use GTM "publish previous version" for now (ADR 0006).',
       ),
   );
+
+  // ---------- dataLayer catalog (ADR 0008) ----------
+  const catalogNotConfigured = (): CallToolResult =>
+    fail('dataLayer catalog not configured (set GITLAB_TOKEN + GITLAB_CATALOG_PROJECT_ID).');
+
+  server.registerTool(
+    'list_datalayer_events',
+    {
+      description:
+        'List every dataLayer event name the site can emit. The CHEAP index — call this FIRST, then drill into one event with get_datalayer_event. Authoritative upstream schema (read-only).',
+      inputSchema: {},
+    },
+    async () => {
+      if (s.catalog === null) return catalogNotConfigured();
+      const v = await s.catalog.listEvents();
+      return v.success ? text(v.data) : fail(v.error.message);
+    },
+  );
+
+  server.registerTool(
+    'get_datalayer_event',
+    {
+      description:
+        "Get ONE dataLayer event's shape. mode=compact (default) collapses fat string-unions and keeps referenced types as bare names; mode=full expands referenced types one level. Call list_datalayer_events first for valid names; drill referenced types with get_datalayer_type.",
+      inputSchema: {
+        name: z.string().min(1).max(200),
+        mode: z.enum(['compact', 'full']).optional(),
+      },
+    },
+    async (args) => {
+      if (s.catalog === null) return catalogNotConfigured();
+      const v = await s.catalog.getEvent(args.name, args.mode ?? 'compact');
+      return v.success ? text(v.data) : fail(v.error.message);
+    },
+  );
+
+  server.registerTool(
+    'get_datalayer_type',
+    {
+      description:
+        'Get ONE helper type from the catalog (a referenced DTO or enum), compacted. Use to walk a type referenced by an event without expanding the whole graph.',
+      inputSchema: { name: z.string().min(1).max(200) },
+    },
+    async (args) => {
+      if (s.catalog === null) return catalogNotConfigured();
+      const v = await s.catalog.getType(args.name);
+      return v.success ? text(v.data) : fail(v.error.message);
+    },
+  );
 }
 
 export const TOOL_NAMES = [
@@ -341,4 +395,7 @@ export const TOOL_NAMES = [
   'apply',
   'reject',
   'inverse',
+  'list_datalayer_events',
+  'get_datalayer_event',
+  'get_datalayer_type',
 ] as const;

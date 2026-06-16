@@ -6,10 +6,10 @@ Facts about our GTM containers, accounts, and environments. Fill in from discove
 
 Account id: `REDACTED_ACCOUNT_ID`.
 
-| Alias  | Type   | Public id   | Numeric id | Notes                                                                                                                                                        |
-| ------ | ------ | ----------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| web    | web    | REDACTED_WEB_PUBLIC_ID | REDACTED_WEB_ID   | Browser container. Large: ~81 tags, ~134 triggers, ~231 variables, 8 folders, 7 custom templates. Live/published workspace at time of writing: 388.          |
-| server | server | REDACTED_SERVER_PUBLIC_ID | REDACTED_SERVER_ID   | Server-side (sGTM) container. Small: ~13 tags, ~11 triggers, ~14 variables, 7 clients, 14 custom templates. Live/published workspace at time of writing: 73. |
+| Alias  | Type   | Public id                 | Numeric id         | Notes                                                                                                                                                        |
+| ------ | ------ | ------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| web    | web    | REDACTED_WEB_PUBLIC_ID    | REDACTED_WEB_ID    | Browser container. Large: ~81 tags, ~134 triggers, ~231 variables, 8 folders, 7 custom templates. Live/published workspace at time of writing: 388.          |
+| server | server | REDACTED_SERVER_PUBLIC_ID | REDACTED_SERVER_ID | Server-side (sGTM) container. Small: ~13 tags, ~11 triggers, ~14 variables, 7 clients, 14 custom templates. Live/published workspace at time of writing: 73. |
 
 Notes:
 

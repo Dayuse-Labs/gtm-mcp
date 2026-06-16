@@ -1,6 +1,6 @@
 ---
 name: gtm-mcp
-description: Operate the GTM MCP server to read and change Google Tag Manager containers (tags, triggers, variables, templates) efficiently, and keep the living GTM docs current. Use when reading or modifying GTM through the agent — changing tags/triggers/variables, renaming entities, updating firing conditions, or inspecting a container.
+description: Drive the GTM MCP server from this repo as the technical operator — read/modify Google Tag Manager (tags, triggers, variables, templates), run multi-step changes, consult the dataLayer catalog, and grow the living `docs/gtm` knowledge base. Use when the repo-resident developer is operating the GTM MCP tools directly (curl/JSON-RPC, multi-step changesets) or maintaining its docs. NOT for a non-technical teammate making a tracking change through the hosted assistant — that is the separate collaborator skill.
 ---
 
 # GTM MCP
@@ -37,14 +37,23 @@ GTM's API quota is tight (~3-5 calls/min). Work from the mirror, not the live AP
    - `export_container` — the whole container in one call (default compact).
    - `search_container` — every entity carrying a value/string, not just by name.
    - DO NOT loop `get_entity` to scan a container — that hammers the quota and fails. Use export/search.
-3. **Two-phase write:**
+3. **Consult the dataLayer catalog — only when it earns its tokens.** Reach for it ONLY to confirm what is _real_ before authoring or validating a dataLayer-conditioned entity: an event name, a property path (e.g. `ecommerce.items.0.dayuse_additional_data.offer.commercialType`), or an allowed value (e.g. `dayuse` / `dayaccess`). Skip it for edits that don't touch dataLayer keys.
+   - `list_datalayer_events` — the cheap index (event names). **Call this FIRST.**
+   - `get_datalayer_event {name, mode}` — one event's shape; `compact` (default) collapses fat string-unions, `full` expands referenced types one level.
+   - `get_datalayer_type {name}` — drill one referenced type on demand.
+   - Always `list` → drill. NEVER try to read the whole catalog; it is large by design.
+4. **Two-phase write:**
    - `preview` — validate + return impacts. READ the impacts before applying.
    - `apply` — writes to a fresh workspace for human review. Check `workspace_status` first (per-container pending cap).
-4. **Never publish** — you can't, by design. The human reviews + publishes in the GTM UI.
+5. **Never publish** — you can't, by design. The human reviews + publishes in the GTM UI.
 
-## Incremental documentation loop
+## Source of truth + documentation loop
 
-`docs/gtm/` is living documentation — each run leaves it better than it found it.
+Read `docs/gtm/README.md` first — it is the **source-of-truth map** (which tier owns what, and what is mutable). In short:
 
-- **BEFORE acting:** read `docs/gtm/` to orient (containers, conventions, dataLayer events/properties). Fewer doc gaps → fewer discovery calls next time.
-- **AFTER acting/discovering:** amend `docs/gtm/` with what you verified — especially **dataLayer events and properties** (the dynamic part), plus container and naming facts. Keep entries factual and concise; don't duplicate existing rows.
+- **dataLayer catalog** = the authoritative, upstream-generated schema (what the site _can_ emit). Read-only, served by the MCP catalog tools above — **never vendor or amend it** ("do not edit by hand").
+- **`docs/gtm/dataLayer.md`** = **bindings**: which GTM entity references which catalog event/property, verified in-container. You amend this. Bindings are also re-derivable live from GTM via `search_container` / `export_container`.
+- `docs/gtm/` is living documentation — each run leaves it better than it found it.
+
+- **BEFORE acting:** read `docs/gtm/` to orient (the map, containers, conventions, bindings). Fewer doc gaps → fewer discovery calls next time.
+- **AFTER verifying a catalog↔GTM wiring:** record it in `dataLayer.md` (the binding + where observed), and add container/naming facts to their files. Keep entries factual and concise; don't duplicate existing rows. Amend the docs — **never** the catalog.

@@ -77,16 +77,17 @@ We store collaborator **emails** (personal data) and encrypted OAuth tokens in P
 
 App service vars set: `NODE_ENV=production`, `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `PENDING_CHANGESET_TTL_HOURS=72`.
 
-**Still to set before deploy** (secrets + domain): `TOKEN_ENCRYPTION_KEY`, `GOOGLE_OAUTH_CLIENT_ID/SECRET/REDIRECT_URI`, `GTM_ACCOUNT_ID/WEB_CONTAINER_ID/SERVER_CONTAINER_ID`, `GOOGLE_CHAT_WEBHOOK_URL`, `MCP_PUBLIC_URL` (after a public domain is generated). Set the Postgres + app service to an **EU region** (RGPD).
+**Still to set before deploy** (secrets + domain): `TOKEN_ENCRYPTION_KEY`, `GOOGLE_OAUTH_CLIENT_ID/SECRET/REDIRECT_URI`, `GTM_ACCOUNT_ID/WEB_CONTAINER_ID/SERVER_CONTAINER_ID`, `GOOGLE_CHAT_WEBHOOK_URL`, `GITLAB_TOKEN` + `GITLAB_CATALOG_PROJECT_ID` (dataLayer catalog — ADR 0008; `GITLAB_TOKEN` is a Railway secret), `MCP_PUBLIC_URL` (after a public domain is generated). Set the Postgres + app service to an **EU region** (RGPD).
 
 ## Built (vertical slice)
 
 - Google OAuth federation (`/oauth/login`, `/oauth/callback`) + AES-256-GCM token encryption at rest.
 - `GtmClient` over `googleapis` (pull, examples, workspace count, workspace + entity writes).
 - Postgres repositories (collaborator, oauth token, changeset, preview) + migration runner.
-- Real tools: `whoami`, `pull`, `list_entities`, `get_entity`, `get_examples`, `export_container`, `search_container`, `workspace_status`, `list_changesets`, `get_changeset`, `preview`, `apply`, `reject`, `list_containers`.
+- Real tools: `whoami`, `pull`, `list_entities`, `get_entity`, `get_examples`, `export_container`, `search_container`, `workspace_status`, `list_changesets`, `get_changeset`, `preview`, `apply`, `reject`, `list_containers`, `list_datalayer_events`, `get_datalayer_event`, `get_datalayer_type`.
 - `export_container` / `search_container` read the local mirror only (zero GTM API calls) — `export_container` dumps the whole container in one call (compact mode omits html/template blobs), `search_container` finds entities that carry a value (e.g. a condition `== daypass`), not just by name. Pull once, then query the mirror freely without touching GTM's tight quota.
 - Two-phase `preview` → `apply`: validation, fail-on-drift (fingerprints), rename/template **dependency impacts**, cap-guard, ephemeral workspace, before-images. Never publishes.
+- **dataLayer catalog** (ADR 0008): `list_datalayer_events` / `get_datalayer_event` / `get_datalayer_type` serve the authoritative upstream schema, fetched live from GitLab (API v4 + granular `read_repository` token), cached with a TTL + `.cache/datalayer/` disk fallback, returned as **compacted slices** (fat string-unions collapsed; referenced types kept as names / pulled on demand). Degrades gracefully when unconfigured or on a failed refresh; never blocks GTM work.
 
 ## Still stubbed / deferred
 
