@@ -14,6 +14,7 @@ import {
   InMemoryPreviewRepository,
   InMemoryChangesetRepository,
   InMemoryToolCallRepository,
+  RecordingNotifier,
 } from '../../test-support/fakes.js';
 
 type Handler = (args: unknown, extra: unknown) => Promise<CallToolResult>;
@@ -34,6 +35,7 @@ interface Over {
   readonly minSkillVersion?: string;
   readonly identity?: Collaborator | null; // null ⇒ resolve fails + identify returns null (anon)
   readonly toolCalls?: InMemoryToolCallRepository;
+  readonly notifier?: RecordingNotifier;
 }
 
 function servicesWith(over: Over = {}): Services {
@@ -54,6 +56,7 @@ function servicesWith(over: Over = {}): Services {
     previews: new InMemoryPreviewRepository(),
     changesets: new InMemoryChangesetRepository(),
     toolCalls: over.toolCalls ?? new InMemoryToolCallRepository(),
+    notifier: over.notifier ?? null,
     containers: { web: 'GTM-WEB', server: 'GTM-SRV' },
     now: () => new Date('2026-06-15T00:00:00.000Z'),
     newId: () => 'id-1',
@@ -165,15 +168,20 @@ describe('tool-call log (ADR 0010)', () => {
 
 describe('usage_stats (ADR 0010)', () => {
   it('refuses a non-admin collaborator', async () => {
-    const handlers = captureTools(servicesWith({ identity: collaborator({ role: 'collaborator' }) }));
+    const handlers = captureTools(
+      servicesWith({ identity: collaborator({ role: 'collaborator' }) }),
+    );
     const res = await rawCall(handlers, 'usage_stats');
     expect(res.isError).toBe(true);
-    expect(res.content[0]).toMatchObject({ text: expect.stringContaining('admin-only') });
+    const first = res.content[0];
+    expect(first?.type === 'text' ? first.text : '').toContain('admin-only');
   });
 
   it('returns a usage rollup for an admin', async () => {
     const toolCalls = new InMemoryToolCallRepository();
-    const handlers = captureTools(servicesWith({ identity: collaborator({ role: 'admin' }), toolCalls }));
+    const handlers = captureTools(
+      servicesWith({ identity: collaborator({ role: 'admin' }), toolCalls }),
+    );
 
     // generate some logged activity first
     await callTool(handlers, 'list_containers');
@@ -185,5 +193,42 @@ describe('usage_stats (ADR 0010)', () => {
     };
     expect(payload.sinceHours).toBe(24);
     expect(payload.usage.some((u) => u.tool === 'list_containers')).toBe(true);
+  });
+});
+
+describe('google chat error push (ADR 0010)', () => {
+  it('does NOT alert on a successful call', async () => {
+    const notifier = new RecordingNotifier();
+    const handlers = captureTools(servicesWith({ notifier }));
+
+    await callTool(handlers, 'list_containers');
+    // give any (incorrect) async alert a chance to land before asserting absence
+    await new Promise((r) => setTimeout(r, 10));
+    expect(notifier.alerts).toHaveLength(0);
+  });
+
+  it('alerts on a failed call with the tool, collaborator and message', async () => {
+    const notifier = new RecordingNotifier();
+    const handlers = captureTools(servicesWith({ notifier, identity: collaborator() }));
+
+    await rawCall(handlers, 'usage_stats'); // non-admin ⇒ isError
+
+    await vi.waitFor(() => expect(notifier.alerts).toHaveLength(1));
+    expect(notifier.alerts[0]).toMatchObject({
+      tool: 'usage_stats',
+      collaboratorEmail: 'author@dayuse.com',
+    });
+    expect(notifier.alerts[0]?.errorMessage).toContain('admin-only');
+  });
+
+  it('alerts even for an anonymous caller, with a null email', async () => {
+    const notifier = new RecordingNotifier();
+    // identity null ⇒ resolve fails ⇒ whoami returns isError
+    const handlers = captureTools(servicesWith({ notifier, identity: null }));
+
+    await rawCall(handlers, 'whoami');
+
+    await vi.waitFor(() => expect(notifier.alerts).toHaveLength(1));
+    expect(notifier.alerts[0]?.collaboratorEmail).toBeNull();
   });
 });

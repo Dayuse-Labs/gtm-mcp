@@ -103,3 +103,7 @@ _Avoid_: owner, superuser, root
 **Tool-call log**:
 The per-Collaborator record of every MCP tool invocation and its outcome (ok/error + duration) — the basis for usage-per-Collaborator and "is everything going right" visibility. Best-effort, not a compliance trail; carries a sanitized arg summary, never raw operation bodies or query text. Distinct from the Changeset audit trail.
 _Avoid_: audit, audit log (reserved for the Changeset sense), telemetry, metrics, analytics
+
+**Error alert**:
+The proactive push to the team's ops channel when a tool call fails — the active half of "is everything going right" (the Tool-call log is the passive half). Deduplicated within a cooldown so a repeating failure notifies once, not continuously.
+_Avoid_: notification, warning, page

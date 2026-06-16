@@ -16,6 +16,7 @@ import { PgPreviewRepository } from './infrastructure/repositories/pg-preview-re
 import { PgToolCallRepository } from './infrastructure/repositories/pg-tool-call-repository.js';
 import { FileMirror } from './infrastructure/mirror/file-mirror.js';
 import { GitlabDatalayerCatalog } from './infrastructure/gtm/gitlab-datalayer-catalog.js';
+import { GoogleChatNotifier } from './infrastructure/notify/google-chat-notifier.js';
 import { DevActorContext } from './infrastructure/actor/actor-context.js';
 import { buildOAuthRouter } from './interfaces/http/oauth-routes.js';
 import { requireAuth } from './interfaces/http/require-auth.js';
@@ -51,6 +52,11 @@ const catalog =
         projectId: env.GITLAB_CATALOG_PROJECT_ID,
       })
     : null;
+// Error-alert push (ADR 0010): null when no webhook configured ⇒ logging still works, no alerts.
+const notifier =
+  env.GOOGLE_CHAT_WEBHOOK_URL !== undefined
+    ? new GoogleChatNotifier({ webhookUrl: env.GOOGLE_CHAT_WEBHOOK_URL })
+    : null;
 const services: Services = {
   actor: new DevActorContext(collaborators, tokens, oauth, cfg),
   mirror: fileMirror,
@@ -58,6 +64,7 @@ const services: Services = {
   previews,
   changesets,
   toolCalls,
+  notifier,
   containers: { web: cfg.webContainerId, server: cfg.serverContainerId },
   now: () => new Date(),
   newId: () => randomUUID(),
