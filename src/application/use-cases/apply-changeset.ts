@@ -12,6 +12,7 @@ import { type Operation } from '../../domain/value-objects/operation.js';
 import { detectDrift } from '../../domain/services/drift.js';
 import { findExisting } from '../../domain/services/state-query.js';
 import { resolveTargetId, type RefContext } from '../../domain/services/reference-resolution.js';
+import { substituteDataRefs } from '../../domain/services/data-refs.js';
 import { type Result, ok, err } from '../../shared/result.js';
 
 export class ApplyError extends Error {
@@ -121,8 +122,12 @@ export async function applyChangeset(
 
   for (const op of preview.operations) {
     const ctx: RefContext = { state: fresh.data, created };
+    const dataRefs = substituteDataRefs(op.data ?? {}, created);
+    if (!dataRefs.success)
+      return rollback(deps, preview.container, workspace, dataRefs.error.message);
+    const data = dataRefs.data;
     if (op.op === 'create') {
-      const res = await deps.gtm.createEntity(workspace, op.entity, op.data ?? {});
+      const res = await deps.gtm.createEntity(workspace, op.entity, data);
       if (!res.success)
         return rollback(
           deps,
@@ -136,7 +141,7 @@ export async function applyChangeset(
       const idRes = resolveTargetId(op.entity, op.target, ctx);
       if (!idRes.success) return rollback(deps, preview.container, workspace, idRes.error.message);
       if (op.op === 'update') {
-        const res = await deps.gtm.updateEntity(workspace, op.entity, idRes.data, op.data ?? {});
+        const res = await deps.gtm.updateEntity(workspace, op.entity, idRes.data, data);
         if (!res.success)
           return rollback(
             deps,

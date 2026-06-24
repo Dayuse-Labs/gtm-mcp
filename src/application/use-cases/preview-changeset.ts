@@ -8,6 +8,7 @@ import { kindsForContainer } from '../../domain/value-objects/entity-kind.js';
 import { buildBaseline } from '../../domain/services/drift.js';
 import { analyzeImpacts } from '../../domain/services/impact-analysis.js';
 import { summarize } from '../../domain/services/operation-summary.js';
+import { validateDataRefs } from '../../domain/services/data-refs.js';
 import { type Result, ok, err } from '../../shared/result.js';
 
 export class ChangesetValidationError extends Error {
@@ -48,6 +49,8 @@ function validateShape(input: PreviewInput): Result<void, ChangesetValidationErr
       return err(new ChangesetValidationError(`create ${op.entity} requires data.`));
     }
   }
+  const refs = validateDataRefs(input.operations);
+  if (!refs.success) return err(new ChangesetValidationError(refs.error.message));
   return ok(undefined);
 }
 
