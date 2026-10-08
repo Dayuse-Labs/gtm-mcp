@@ -15,6 +15,7 @@ interface Row {
   summary: string[] | null;
   before_images: Record<string, unknown> | null;
   gtm_workspace_id: string | null;
+  gtm_version_id: string | null;
 }
 
 function toChangeset(r: Row): Changeset {
@@ -28,11 +29,12 @@ function toChangeset(r: Row): Changeset {
     summary: r.summary ?? [],
     beforeImages: r.before_images,
     gtmWorkspaceId: r.gtm_workspace_id,
+    gtmVersionId: r.gtm_version_id,
   };
 }
 
 const COLS =
-  'id, author_id, container_alias, plan_id, status, operations, summary, before_images, gtm_workspace_id';
+  'id, author_id, container_alias, plan_id, status, operations, summary, before_images, gtm_workspace_id, gtm_version_id';
 
 export class PgChangesetRepository implements ChangesetRepository {
   constructor(private readonly pool: DbPool) {}
@@ -40,9 +42,10 @@ export class PgChangesetRepository implements ChangesetRepository {
   async save(c: Changeset): Promise<Result<Changeset>> {
     try {
       await this.pool.query(
-        `INSERT INTO changeset (id, author_id, container_alias, plan_id, status, operations, summary, before_images, gtm_workspace_id, applied_at)
-         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9, CASE WHEN $5 = 'applied' THEN now() ELSE NULL END)
-         ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, summary = EXCLUDED.summary, before_images = EXCLUDED.before_images, gtm_workspace_id = EXCLUDED.gtm_workspace_id`,
+        `INSERT INTO changeset (id, author_id, container_alias, plan_id, status, operations, summary, before_images, gtm_workspace_id, gtm_version_id, applied_at)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9, $10, CASE WHEN $5 = 'applied' THEN now() ELSE NULL END)
+         ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, summary = EXCLUDED.summary, before_images = EXCLUDED.before_images, gtm_workspace_id = EXCLUDED.gtm_workspace_id, gtm_version_id = EXCLUDED.gtm_version_id,
+           published_at = CASE WHEN EXCLUDED.status = 'published' THEN COALESCE(changeset.published_at, now()) ELSE changeset.published_at END`,
         [
           c.id,
           c.authorId,
@@ -53,6 +56,7 @@ export class PgChangesetRepository implements ChangesetRepository {
           JSON.stringify(c.summary),
           c.beforeImages === null ? null : JSON.stringify(c.beforeImages),
           c.gtmWorkspaceId,
+          c.gtmVersionId,
         ],
       );
       return ok(c);

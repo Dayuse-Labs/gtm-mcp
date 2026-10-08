@@ -1,7 +1,15 @@
 import { z } from 'zod';
 import { type McpServer, type ToolCallback } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { ContainerAliasSchema } from '../../domain/value-objects/container-alias.js';
+import {
+  ContainerAliasSchema,
+  type ContainerAlias,
+  type ContainerIds,
+  parseContainerAlias,
+  resolveContainerId,
+} from '../../domain/value-objects/container-alias.js';
+import { type ContainerState } from '../../domain/ports/gtm-client.js';
+import { type Result, ok, err } from '../../shared/result.js';
 import { EntityTypeSchema, OperationsSchema } from '../../domain/value-objects/operation.js';
 import { type ActorContext } from '../../infrastructure/actor/actor-context.js';
 import { type MirrorWriter } from '../../application/use-cases/pull-container.js';
@@ -21,7 +29,9 @@ import {
   applyChangeset,
   GTM_WORKSPACE_LIMIT,
 } from '../../application/use-cases/apply-changeset.js';
+import { publishChangeset } from '../../application/use-cases/publish-changeset.js';
 import { findExisting } from '../../domain/services/state-query.js';
+import { canManageChangeset } from '../../domain/services/role-policy.js';
 
 const ChangesetStatusSchema = z.enum(['draft', 'previewed', 'applied', 'rejected', 'published']);
 
@@ -33,7 +43,7 @@ export interface Services {
   readonly changesets: ChangesetRepository;
   readonly toolCalls: ToolCallRepository;
   readonly notifier: Notifier | null;
-  readonly containers: { readonly web: string; readonly server: string };
+  readonly containers: ContainerIds;
   readonly now: () => Date;
   readonly newId: () => string;
   readonly previewTtlHours: number;
@@ -183,6 +193,27 @@ const wrapWithLogging = <InputArgs extends z.ZodRawShape>(
   return wrapped as unknown as ToolCallback<InputArgs>;
 };
 
+/** Fails a call that targets a container alias this deployment does not configure. */
+const requireConfiguredContainer = <InputArgs extends z.ZodRawShape>(
+  s: Services,
+  handler: ToolCallback<InputArgs>,
+): ToolCallback<InputArgs> => {
+  const run = handler as unknown as (
+    args: unknown,
+    extra: unknown,
+  ) => CallToolResult | Promise<CallToolResult>;
+  const guarded = (args: unknown, extra: unknown): CallToolResult | Promise<CallToolResult> => {
+    const raw = containerOf(args);
+    const alias = raw === null ? null : parseContainerAlias(raw);
+    if (alias?.success === true) {
+      const id = resolveContainerId(s.containers, alias.data);
+      if (!id.success) return fail(id.error.message);
+    }
+    return run(args, extra);
+  };
+  return guarded as unknown as ToolCallback<InputArgs>;
+};
+
 export function registerTools(server: McpServer, s: Services): void {
   // Register through a wrapper so EVERY tool call is logged uniformly (ADR 0010).
   const register = server.registerTool.bind(server);
@@ -191,17 +222,26 @@ export function registerTools(server: McpServer, s: Services): void {
     config: { description: string; inputSchema: InputArgs },
     handler: ToolCallback<InputArgs>,
   ): void => {
-    register(name, config, wrapWithLogging(s, name, handler));
+    register(name, config, wrapWithLogging(s, name, requireConfiguredContainer(s, handler)));
+  };
+
+  const readMirror = async (container: ContainerAlias): Promise<Result<ContainerState>> => {
+    const r = await s.mirrorReader.read(container);
+    if (!r.success) return r;
+    return r.data === null
+      ? err(new Error(`The ${container} mirror is empty — run pull first.`))
+      : ok(r.data);
   };
 
   // ---------- Read / discovery ----------
   reg(
     'list_containers',
     {
-      description: 'List the registered web/server containers and their GTM ids.',
+      description:
+        'List the container aliases (web, server, preprod) and their GTM container ids; null means the alias is not configured on this server.',
       inputSchema: {},
     },
-    () => text({ web: s.containers.web, server: s.containers.server }),
+    () => text(s.containers),
   );
 
   reg(
@@ -235,7 +275,7 @@ export function registerTools(server: McpServer, s: Services): void {
     'list_entities',
     {
       description:
-        'List entities of a type in a container (optionally filtered by name substring).',
+        'List entities of a type from the local mirror (zero GTM API calls), optionally filtered by name substring. Run pull first if the mirror is empty.',
       inputSchema: {
         container: ContainerAliasSchema,
         type: EntityTypeSchema,
@@ -243,12 +283,10 @@ export function registerTools(server: McpServer, s: Services): void {
       },
     },
     async (args) => {
-      const a = await s.actor.resolve();
-      if (!a.success) return fail(a.error.message);
-      const pulled = await a.data.gtm.pull(args.container);
-      if (!pulled.success) return fail(pulled.error.message);
+      const mirrored = await readMirror(args.container);
+      if (!mirrored.success) return fail(mirrored.error.message);
       const f = args.filter?.toLowerCase();
-      const rows = (pulled.data[args.type] ?? [])
+      const rows = (mirrored.data[args.type] ?? [])
         .filter((e) => (f ? e.name.toLowerCase().includes(f) : true))
         .map((e) => ({ id: e.id, name: e.name }));
       return text({ type: args.type, count: rows.length, entities: rows });
@@ -258,7 +296,8 @@ export function registerTools(server: McpServer, s: Services): void {
   reg(
     'get_entity',
     {
-      description: 'Get one entity (full GTM JSON) by name or id.',
+      description:
+        'Get one entity (full GTM JSON) by name or id from the local mirror (zero GTM API calls). Run pull first if the mirror is empty.',
       inputSchema: {
         container: ContainerAliasSchema,
         type: EntityTypeSchema,
@@ -266,11 +305,9 @@ export function registerTools(server: McpServer, s: Services): void {
       },
     },
     async (args) => {
-      const a = await s.actor.resolve();
-      if (!a.success) return fail(a.error.message);
-      const pulled = await a.data.gtm.pull(args.container);
-      if (!pulled.success) return fail(pulled.error.message);
-      const found = findExisting(pulled.data, args.type, { id: args.ref, name: args.ref });
+      const mirrored = await readMirror(args.container);
+      if (!mirrored.success) return fail(mirrored.error.message);
+      const found = findExisting(mirrored.data, args.type, { id: args.ref, name: args.ref });
       return found.success ? text(found.data.raw) : fail(found.error.message);
     },
   );
@@ -366,6 +403,7 @@ export function registerTools(server: McpServer, s: Services): void {
           status: c.status,
           ops: c.operations.length,
           workspace: c.gtmWorkspaceId,
+          version: c.gtmVersionId,
         })),
       );
     },
@@ -420,7 +458,7 @@ export function registerTools(server: McpServer, s: Services): void {
     'apply',
     {
       description:
-        'Phase 2 of Apply: write a previewed changeset into a fresh ephemeral GTM workspace. Never publishes.',
+        'Phase 2 of Apply: write a previewed changeset into a fresh ephemeral GTM workspace. Does not publish (see publish).',
       inputSchema: { previewId: z.string().uuid() },
     },
     async (args) => {
@@ -454,6 +492,8 @@ export function registerTools(server: McpServer, s: Services): void {
       if (!found.success) return fail(found.error.message);
       const cs = found.data;
       if (cs === null) return fail('Changeset not found.');
+      if (!canManageChangeset(a.data.collaborator, cs.authorId))
+        return fail('Only the changeset author (or an admin) may reject it.');
       if (cs.gtmWorkspaceId !== null) {
         const del = await a.data.gtm.deleteWorkspace(cs.containerAlias, cs.gtmWorkspaceId);
         if (!del.success) return fail(`Could not delete workspace: ${del.error.message}`);
@@ -462,6 +502,25 @@ export function registerTools(server: McpServer, s: Services): void {
       return saved.success
         ? text({ changesetId: cs.id, status: 'rejected' })
         : fail(saved.error.message);
+    },
+  );
+
+  reg(
+    'publish',
+    {
+      description:
+        'Admin-only. Make an applied changeset live: cuts a GTM container version from its workspace (named after the changeset, which consumes the workspace), then publishes it. Call ONLY after the change has been observed in GTM Preview on that workspace (gtm-change skill, step 5); an unverified change must not be published. Refuses on drift, merge conflict or compiler error without publishing. Returns the published versionId.',
+      inputSchema: { changesetId: z.string().uuid() },
+    },
+    async (args) => {
+      const a = await s.actor.resolve();
+      if (!a.success) return fail(a.error.message);
+      const v = await publishChangeset(
+        { gtm: a.data.gtm, changesets: s.changesets },
+        a.data.collaborator,
+        args.changesetId,
+      );
+      return v.success ? text(v.data) : fail(`[${v.error.code}] ${v.error.message}`);
     },
   );
 
@@ -510,7 +569,10 @@ export function registerTools(server: McpServer, s: Services): void {
     async () => {
       if (s.catalog === null) return catalogNotConfigured();
       const v = await s.catalog.listEvents();
-      return v.success ? text(v.data) : fail(v.error.message);
+      if (!v.success) return fail(v.error.message);
+      return v.data.staleWarning === null
+        ? text(v.data.events)
+        : text({ warning: v.data.staleWarning, events: v.data.events });
     },
   );
 
@@ -561,6 +623,7 @@ export const TOOL_NAMES = [
   'preview',
   'apply',
   'reject',
+  'publish',
   'inverse',
   'usage_stats',
   'list_datalayer_events',

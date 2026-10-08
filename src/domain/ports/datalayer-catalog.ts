@@ -10,9 +10,15 @@ import { type Result } from '../../shared/result.js';
  */
 export type CatalogMode = 'compact' | 'full';
 
+export interface CatalogIndex {
+  readonly events: readonly string[];
+  /** Set when serving a last-good copy because the upstream refresh failed. */
+  readonly staleWarning: string | null;
+}
+
 export interface DatalayerCatalog {
   /** Cheap index: every event name. */
-  listEvents(): Promise<Result<readonly string[]>>;
+  listEvents(): Promise<Result<CatalogIndex>>;
   /** One event's shape, compacted. `full` expands referenced named types one level. */
   getEvent(name: string, mode: CatalogMode): Promise<Result<string>>;
   /** One helper type's body, compacted. */

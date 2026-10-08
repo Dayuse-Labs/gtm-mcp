@@ -59,13 +59,16 @@ describe('previewChangeset', () => {
     expect(r.success).toBe(false);
   });
 
-  it('rejects a server-only kind in the web container', async () => {
-    const ops: Operation[] = [{ op: 'create', entity: 'client', data: { name: 'GA4 Client' } }];
-    const r = await previewChangeset(deps(new FakeGtmClient(daypassState)), {
-      author: collaborator(),
-      container: 'web',
-      operations: ops,
-    });
-    expect(r.success).toBe(false);
-  });
+  it.each(['web', 'preprod'] as const)(
+    'rejects a server-only kind in the %s container',
+    async (container) => {
+      const ops: Operation[] = [{ op: 'create', entity: 'client', data: { name: 'GA4 Client' } }];
+      const r = await previewChangeset(deps(new FakeGtmClient(daypassState)), {
+        author: collaborator(),
+        container,
+        operations: ops,
+      });
+      expect(r.success).toBe(false);
+    },
+  );
 });

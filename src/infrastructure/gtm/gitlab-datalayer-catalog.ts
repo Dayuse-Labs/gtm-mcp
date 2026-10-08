@@ -1,6 +1,10 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { type CatalogMode, type DatalayerCatalog } from '../../domain/ports/datalayer-catalog.js';
+import {
+  type CatalogIndex,
+  type CatalogMode,
+  type DatalayerCatalog,
+} from '../../domain/ports/datalayer-catalog.js';
 import {
   parseCatalog,
   listEvents,
@@ -83,10 +87,14 @@ export class GitlabDatalayerCatalog implements DatalayerCatalog {
     this.fetcher = cfg.fetcher ?? defaultFetcher;
   }
 
-  async listEvents(): Promise<Result<readonly string[]>> {
+  async listEvents(): Promise<Result<CatalogIndex>> {
     const r = await this.ensureFresh();
     if (!r.success) return r;
-    return ok(listEvents(r.data.parsed));
+    const prefix = this.stalePrefix(r.data);
+    return ok({
+      events: listEvents(r.data.parsed),
+      staleWarning: prefix === '' ? null : prefix.replace(/^\/\/\s*/, '').trim(),
+    });
   }
 
   async getEvent(name: string, mode: CatalogMode): Promise<Result<string>> {

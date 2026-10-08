@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { applyChangeset, type ApplyDeps } from './apply-changeset.js';
 import { previewChangeset } from './preview-changeset.js';
 import { type Operation } from '../../domain/value-objects/operation.js';
+import { type ContainerAlias } from '../../domain/value-objects/container-alias.js';
 import {
   FakeGtmClient,
   InMemoryPreviewRepository,
@@ -17,7 +18,7 @@ const RENAME: Operation[] = [
   { op: 'update', entity: 'variable', target: { id: 'v1' }, data: { name: 'dayaccess' } },
 ];
 
-async function setup() {
+async function setup(container: ContainerAlias = 'web') {
   const gtm = new FakeGtmClient(
     stateWith({ variable: [snap('variable', 'v1', 'daypass', 'fp-A')] }),
   );
@@ -26,7 +27,7 @@ async function setup() {
   const author = collaborator();
   const p = await previewChangeset(
     { gtm, previews, now: fixedNow, newId: sequentialId, previewTtlHours: 24 },
-    { author, container: 'web', operations: RENAME },
+    { author, container, operations: RENAME },
   );
   if (!p.success) throw new Error('preview failed in setup');
   const deps: ApplyDeps = {
@@ -66,6 +67,22 @@ describe('applyChangeset', () => {
     gtm.workspaceCount = 3;
     const r = await applyChangeset(deps, author, previewId);
     expect(!r.success && r.error.code).toBe('cap_reached');
+  });
+
+  it('counts the workspace cap per container (preprod full, web free)', async () => {
+    const { gtm, author, deps, previewId } = await setup('preprod');
+    gtm.workspaceCountByContainer = { web: 1, preprod: 3 };
+    const r = await applyChangeset(deps, author, previewId);
+    expect(!r.success && r.error.code).toBe('cap_reached');
+    expect(!r.success && r.error.message).toContain('preprod');
+  });
+
+  it('applies a preprod changeset and records its container', async () => {
+    const { gtm, author, deps, changesets, previewId } = await setup('preprod');
+    gtm.workspaceCountByContainer = { web: 3, preprod: 1 };
+    const r = await applyChangeset(deps, author, previewId);
+    expect(r.success).toBe(true);
+    expect([...changesets.store.values()][0]?.containerAlias).toBe('preprod');
   });
 
   it('allows when the live GTM workspace count is below the limit', async () => {

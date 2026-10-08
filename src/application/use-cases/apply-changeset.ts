@@ -7,7 +7,8 @@ import { type ContainerAlias } from '../../domain/value-objects/container-alias.
 import { type PreviewRepository } from '../../domain/repositories/preview-repository.js';
 import { type ChangesetRepository } from '../../domain/repositories/changeset-repository.js';
 import { type Changeset } from '../../domain/entities/changeset.js';
-import { type Collaborator, isAdmin } from '../../domain/entities/collaborator.js';
+import { type Collaborator } from '../../domain/entities/collaborator.js';
+import { authorizeOperations, canManageChangeset } from '../../domain/services/role-policy.js';
 import { type Operation } from '../../domain/value-objects/operation.js';
 import { detectDrift } from '../../domain/services/drift.js';
 import { findExisting } from '../../domain/services/state-query.js';
@@ -61,7 +62,7 @@ function beforeImages(
   return images;
 }
 
-/** apply — phase 2: write a previewed changeset into a fresh ephemeral workspace (ADR 0005/0006). Never publishes. */
+/** apply — phase 2: write a previewed changeset into a fresh ephemeral workspace (ADR 0005/0006). Does not publish. */
 export async function applyChangeset(
   deps: ApplyDeps,
   actor: Collaborator,
@@ -73,11 +74,14 @@ export async function applyChangeset(
   if (preview === null)
     return err(new ApplyError('Preview not found or expired — re-run preview.', 'expired'));
 
-  if (preview.authorId !== actor.id && !isAdmin(actor)) {
+  if (!canManageChangeset(actor, preview.authorId)) {
     return err(
       new ApplyError('Only the changeset author (or an admin) may apply it.', 'forbidden'),
     );
   }
+  // Re-checked here because an admin may apply someone else's preview, and roles can change after preview.
+  const allowed = authorizeOperations(actor, preview.operations);
+  if (!allowed.success) return err(new ApplyError(allowed.error.message, 'forbidden'));
 
   // Fail-on-drift: re-pull and compare fingerprints against the preview baseline.
   const fresh = await deps.gtm.pull(preview.container);
@@ -172,6 +176,7 @@ export async function applyChangeset(
     summary: preview.summary,
     beforeImages: images,
     gtmWorkspaceId: workspace.id,
+    gtmVersionId: null,
   };
   const saved = await deps.changesets.save(changeset);
   if (!saved.success)
@@ -182,7 +187,7 @@ export async function applyChangeset(
     changesetId,
     workspace,
     summary: preview.summary,
-    note: 'Applied to a workspace. Review and PUBLISH it in the GTM UI — the agent never publishes (ADR 0003).',
+    note: 'Applied to a workspace. Verify it in GTM Preview; only then may an admin publish it (publish tool or GTM UI).',
   });
 }
 

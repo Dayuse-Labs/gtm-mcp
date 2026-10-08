@@ -1,5 +1,5 @@
 import { type ContainerState } from '../ports/gtm-client.js';
-import { type Operation } from '../value-objects/operation.js';
+import { EntityTypeSchema, type Operation } from '../value-objects/operation.js';
 import { type BaselineEntry } from '../entities/preview.js';
 import { type Result, ok, err } from '../../shared/result.js';
 import { findExisting, EntityNotFoundError } from './state-query.js';
@@ -53,4 +53,27 @@ export function detectDrift(
     }
   }
   return findings;
+}
+
+/**
+ * Rebuild a drift baseline from Apply's before-images (keyed `${kind}:${id}`), so publish can
+ * refuse when GTM's live version moved under the workspace after Apply.
+ */
+export function baselineFromBeforeImages(
+  beforeImages: Readonly<Record<string, unknown>>,
+): BaselineEntry[] {
+  const baseline: BaselineEntry[] = [];
+  for (const [key, image] of Object.entries(beforeImages)) {
+    const separator = key.indexOf(':');
+    const kind = EntityTypeSchema.safeParse(key.slice(0, separator));
+    if (separator < 0 || !kind.success || image === null || typeof image !== 'object') continue;
+    const raw = image as Record<string, unknown>;
+    baseline.push({
+      kind: kind.data,
+      id: key.slice(separator + 1),
+      name: typeof raw.name === 'string' ? raw.name : '(unnamed)',
+      fingerprint: typeof raw.fingerprint === 'string' ? raw.fingerprint : '',
+    });
+  }
+  return baseline;
 }

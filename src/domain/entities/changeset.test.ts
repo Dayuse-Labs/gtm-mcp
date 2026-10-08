@@ -12,6 +12,7 @@ const base: Changeset = {
   summary: [],
   beforeImages: null,
   gtmWorkspaceId: null,
+  gtmVersionId: null,
 };
 
 const author: Collaborator = {

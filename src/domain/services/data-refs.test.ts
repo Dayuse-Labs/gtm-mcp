@@ -1,9 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  collectDataRefs,
-  substituteDataRefs,
-  validateDataRefs,
-} from './data-refs.js';
+import { collectDataRefs, substituteDataRefs, validateDataRefs } from './data-refs.js';
 import { type Operation } from '../value-objects/operation.js';
 
 describe('collectDataRefs', () => {
