@@ -5,6 +5,7 @@
     "buildCommand": "npm run build"
   },
   "deploy": {
+    "preDeployCommand": ["node dist/infrastructure/persistence/migrate.js"],
     "startCommand": "npm run start",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 60,
