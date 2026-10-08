@@ -1,6 +1,10 @@
 import { type Collaborator } from '../../domain/entities/collaborator.js';
 import { type GtmClient } from '../../domain/ports/gtm-client.js';
-import { type ContainerAlias } from '../../domain/value-objects/container-alias.js';
+import {
+  type ContainerAlias,
+  CONTAINER_ALIASES,
+  ContainerNotConfiguredError,
+} from '../../domain/value-objects/container-alias.js';
 import { type Result, ok } from '../../shared/result.js';
 
 export interface IdentityView {
@@ -14,16 +18,16 @@ export async function getIdentity(
   deps: { readonly gtm: GtmClient },
   actor: Collaborator,
 ): Promise<Result<IdentityView>> {
-  const aliases: ContainerAlias[] = ['web', 'server'];
   const containers: Array<{ alias: ContainerAlias; access: string }> = [];
-  for (const alias of aliases) {
+  for (const alias of CONTAINER_ALIASES) {
     const res = await deps.gtm.describeAccess(alias);
-    containers.push({
-      alias,
-      access: res.success
-        ? `ok (${res.data.containerPublicId})`
-        : `no access (${res.error.message})`,
-    });
+    containers.push({ alias, access: describe(res) });
   }
   return ok({ email: actor.email, role: actor.role, containers });
+}
+
+function describe(res: Result<{ containerPublicId: string }>): string {
+  if (res.success) return `ok (${res.data.containerPublicId})`;
+  if (res.error instanceof ContainerNotConfiguredError) return 'not configured';
+  return `no access (${res.error.message})`;
 }

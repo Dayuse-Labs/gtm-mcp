@@ -4,7 +4,7 @@ import { type Collaborator, isAdmin } from './collaborator.js';
 
 /**
  * Changeset lifecycle (ADR 0004, 0005, 0006):
- *   draft -> previewed -> applied -> published (human, in GTM UI)
+ *   draft -> previewed -> applied -> published (admin `publish` tool, ADR 0011)
  *                                 \-> rejected (workspace deleted, slot freed)
  */
 export type ChangesetStatus = 'draft' | 'previewed' | 'applied' | 'rejected' | 'published';
@@ -22,6 +22,8 @@ export interface Changeset {
   readonly beforeImages: Record<string, unknown> | null;
   /** Ephemeral GTM workspace created at Apply (ADR 0005). */
   readonly gtmWorkspaceId: string | null;
+  /** Container version cut from the workspace at publish; set before the publish call so a failed publish can be retried. */
+  readonly gtmVersionId: string | null;
 }
 
 /**

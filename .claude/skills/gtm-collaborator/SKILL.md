@@ -25,7 +25,7 @@ This skill is **version 1.0.0** (see `skillVersion` above).
 
 - **The assistant cannot publish.** It prepares a change in a review workspace; **you** publish it in the GTM UI. Always.
 - **A change replaces the whole item, not one field.** The preview shows the full new version — read all of it, not just the headline.
-- **The summary lists NAME changes only.** If you changed a _value_ or _text inside_ a tag (a filter value, a pixel label), the summary won't show it — ask the assistant to confirm with `get_changeset`.
+- **The summary lists each changed field, old → new**, including values and text inside a tag. It shows at most 8 changes per item; if it says "+N more", ask the assistant for the full list with `get_changeset`.
 - **If the assistant warns about "drift" / "the live version changed"** — stop. Someone else edited that item. Re-check before continuing.
 - **Only 3 workspaces per container** (one is the permanent Default). If it's full, an older pending change must be rejected first — ask the assistant to do it.
 - **Text buried inside a tag isn't changed by renaming.** To change a word inside a tag (e.g. a pixel event label), ask the assistant to **search** for the exact text (it uses `search_container`) — renaming the tag alone won't touch it.

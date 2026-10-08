@@ -31,8 +31,11 @@ const pool = createPool(env.DATABASE_URL);
 const cipher = new TokenCipher(env.TOKEN_ENCRYPTION_KEY);
 const cfg: GtmContainerConfig = {
   accountId: env.GTM_ACCOUNT_ID,
-  webContainerId: env.GTM_WEB_CONTAINER_ID,
-  serverContainerId: env.GTM_SERVER_CONTAINER_ID,
+  containerIds: {
+    web: env.GTM_WEB_CONTAINER_ID,
+    server: env.GTM_SERVER_CONTAINER_ID,
+    preprod: env.GTM_PREPROD_CONTAINER_ID ?? null,
+  },
 };
 const oauth = new GoogleOAuth({
   clientId: env.GOOGLE_OAUTH_CLIENT_ID,
@@ -65,7 +68,7 @@ const services: Services = {
   changesets,
   toolCalls,
   notifier,
-  containers: { web: cfg.webContainerId, server: cfg.serverContainerId },
+  containers: cfg.containerIds,
   now: () => new Date(),
   newId: () => randomUUID(),
   previewTtlHours: 24,

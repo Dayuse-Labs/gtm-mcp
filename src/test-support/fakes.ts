@@ -3,8 +3,14 @@ import {
   type GtmEntitySnapshot,
   type GtmWorkspaceRef,
   type ContainerState,
+  type VersionCreation,
+  type VersionMeta,
+  type VersionPublication,
 } from '../domain/ports/gtm-client.js';
-import { type ContainerAlias } from '../domain/value-objects/container-alias.js';
+import {
+  type ContainerAlias,
+  ContainerNotConfiguredError,
+} from '../domain/value-objects/container-alias.js';
 import { type EntityType } from '../domain/value-objects/operation.js';
 import { ALL_KINDS } from '../domain/value-objects/entity-kind.js';
 import { type Collaborator } from '../domain/entities/collaborator.js';
@@ -18,7 +24,7 @@ import {
   type UsageRollup,
 } from '../domain/repositories/tool-call-repository.js';
 import { type Notifier, type ToolErrorAlert } from '../domain/ports/notifier.js';
-import { type Result, ok } from '../shared/result.js';
+import { type Result, ok, err } from '../shared/result.js';
 
 export function emptyState(): ContainerState {
   const s: Partial<Record<EntityType, readonly GtmEntitySnapshot[]>> = {};
@@ -50,13 +56,25 @@ export function stateWith(
 }
 
 export interface RecordedCall {
-  readonly op: 'create' | 'update' | 'delete' | 'createWorkspace' | 'deleteWorkspace';
+  readonly op:
+    | 'create'
+    | 'update'
+    | 'delete'
+    | 'createWorkspace'
+    | 'deleteWorkspace'
+    | 'createVersion'
+    | 'publishVersion';
   readonly kind?: EntityType;
   readonly id?: string;
+  readonly name?: string;
 }
 
 export class FakeGtmClient implements GtmClient {
   public calls: RecordedCall[] = [];
+  public versionCreation: VersionCreation = { kind: 'created', versionId: 'v-42' };
+  public versionPublication: VersionPublication | null = null;
+  public unconfigured = new Set<ContainerAlias>();
+  public workspaceCountByContainer: Partial<Record<ContainerAlias, number>> = {};
   private idSeq = 0;
 
   constructor(
@@ -64,7 +82,8 @@ export class FakeGtmClient implements GtmClient {
     public workspaceCount = 1,
   ) {}
 
-  describeAccess(): Promise<Result<{ containerPublicId: string }>> {
+  describeAccess(c: ContainerAlias): Promise<Result<{ containerPublicId: string }>> {
+    if (this.unconfigured.has(c)) return Promise.resolve(err(new ContainerNotConfiguredError(c)));
     return Promise.resolve(ok({ containerPublicId: 'GTM-TEST' }));
   }
   pull(): Promise<Result<ContainerState>> {
@@ -73,8 +92,8 @@ export class FakeGtmClient implements GtmClient {
   getExamples(_c: ContainerAlias, kind: EntityType): Promise<Result<readonly GtmEntitySnapshot[]>> {
     return Promise.resolve(ok((this.state[kind] ?? []).slice(0, 5)));
   }
-  countWorkspaces(): Promise<Result<number>> {
-    return Promise.resolve(ok(this.workspaceCount));
+  countWorkspaces(c: ContainerAlias): Promise<Result<number>> {
+    return Promise.resolve(ok(this.workspaceCountByContainer[c] ?? this.workspaceCount));
   }
   createWorkspace(_c: ContainerAlias, name: string): Promise<Result<GtmWorkspaceRef>> {
     this.calls.push({ op: 'createWorkspace' });
@@ -110,6 +129,18 @@ export class FakeGtmClient implements GtmClient {
   deleteEntity(_w: GtmWorkspaceRef, kind: EntityType, id: string): Promise<Result<void>> {
     this.calls.push({ op: 'delete', kind, id });
     return Promise.resolve(ok(undefined));
+  }
+  createVersion(
+    _c: ContainerAlias,
+    workspaceId: string,
+    meta: VersionMeta,
+  ): Promise<Result<VersionCreation>> {
+    this.calls.push({ op: 'createVersion', id: workspaceId, name: meta.name });
+    return Promise.resolve(ok(this.versionCreation));
+  }
+  publishVersion(_c: ContainerAlias, versionId: string): Promise<Result<VersionPublication>> {
+    this.calls.push({ op: 'publishVersion', id: versionId });
+    return Promise.resolve(ok(this.versionPublication ?? { kind: 'published', versionId }));
   }
 }
 

@@ -1,5 +1,7 @@
 # Per-user Google OAuth, with no publish scope
 
+> **Partly superseded by [ADR 0011](0011-full-scope-role-gated-permissions.md):** per-user OAuth stands; the scope set and the no-publish guarantee do not.
+
 Each Collaborator authenticates with **their own Google OAuth** (internal `dayuse.com` app, single sign-in that also yields GTM access). The server requests only `tagmanager.edit.containers` + `tagmanager.readonly` — **never the publish scope**. We rejected a shared service account.
 
 ## Why

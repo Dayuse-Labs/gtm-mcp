@@ -3,9 +3,16 @@ import { type Result, ok, err } from '../../shared/result.js';
 
 export type OAuth2Client = InstanceType<typeof google.auth.OAuth2>;
 
-/** Scopes requested — edit + readonly, NEVER publish (ADR 0003). */
+/**
+ * Superset needed by every role (ADR 0011); what each role may actually do is enforced
+ * server-side by the role policy. `delete.containers` is how GTM gates workspace deletion
+ * (reject/rollback); `edit.containerversions` + `publish` are both needed to publish a workspace.
+ */
 export const GTM_SCOPES = [
   'https://www.googleapis.com/auth/tagmanager.edit.containers',
+  'https://www.googleapis.com/auth/tagmanager.delete.containers',
+  'https://www.googleapis.com/auth/tagmanager.edit.containerversions',
+  'https://www.googleapis.com/auth/tagmanager.publish',
   'https://www.googleapis.com/auth/tagmanager.readonly',
   // identity, to read the user's email/sub for attribution
   'openid',

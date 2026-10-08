@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildBaseline, detectDrift } from './drift.js';
+import { baselineFromBeforeImages, buildBaseline, detectDrift } from './drift.js';
 import { type Operation } from '../value-objects/operation.js';
 import { stateWith, snap, emptyState } from '../../test-support/fakes.js';
 
@@ -30,5 +30,16 @@ describe('drift (ADR 0006)', () => {
   it('flags deleted', () => {
     const r = buildBaseline(ops, base);
     expect(r.success && detectDrift(r.data, emptyState())[0]?.reason).toBe('deleted');
+  });
+});
+
+describe('baselineFromBeforeImages', () => {
+  it('rebuilds fingerprints from before-images and skips unknown kinds', () => {
+    const baseline = baselineFromBeforeImages({
+      'tag:10': { name: 'Tag', fingerprint: 'fp-A' },
+      'bogus:1': { name: 'x', fingerprint: 'fp' },
+    });
+    expect(baseline).toEqual([{ kind: 'tag', id: '10', name: 'Tag', fingerprint: 'fp-A' }]);
+    expect(detectDrift(baseline, base)).toEqual([]);
   });
 });

@@ -7,6 +7,7 @@ import { type ActorContext, type ResolvedActor } from '../../infrastructure/acto
 import { type MirrorWriter } from '../../application/use-cases/pull-container.js';
 import { type MirrorReader } from '../../domain/ports/mirror-reader.js';
 import { type Collaborator } from '../../domain/entities/collaborator.js';
+import { type ContainerIds } from '../../domain/value-objects/container-alias.js';
 import {
   FakeGtmClient,
   emptyState,
@@ -36,6 +37,8 @@ interface Over {
   readonly identity?: Collaborator | null; // null ⇒ resolve fails + identify returns null (anon)
   readonly toolCalls?: InMemoryToolCallRepository;
   readonly notifier?: RecordingNotifier;
+  readonly containers?: ContainerIds;
+  readonly mirrorReader?: MirrorReader;
 }
 
 function servicesWith(over: Over = {}): Services {
@@ -48,7 +51,7 @@ function servicesWith(over: Over = {}): Services {
     identify: (): Promise<Collaborator | null> => Promise.resolve(who),
   };
   const mirror: MirrorWriter = { write: () => Promise.resolve(ok(undefined)) };
-  const mirrorReader: MirrorReader = { read: () => Promise.resolve(ok(null)) };
+  const mirrorReader: MirrorReader = over.mirrorReader ?? { read: () => Promise.resolve(ok(null)) };
   return {
     actor,
     mirror,
@@ -57,7 +60,7 @@ function servicesWith(over: Over = {}): Services {
     changesets: new InMemoryChangesetRepository(),
     toolCalls: over.toolCalls ?? new InMemoryToolCallRepository(),
     notifier: over.notifier ?? null,
-    containers: { web: 'GTM-WEB', server: 'GTM-SRV' },
+    containers: over.containers ?? { web: 'GTM-WEB', server: 'GTM-SRV', preprod: 'GTM-PRE' },
     now: () => new Date('2026-06-15T00:00:00.000Z'),
     newId: () => 'id-1',
     previewTtlHours: 24,
@@ -230,5 +233,53 @@ describe('google chat error push (ADR 0010)', () => {
 
     await vi.waitFor(() => expect(notifier.alerts).toHaveLength(1));
     expect(notifier.alerts[0]?.collaboratorEmail).toBeNull();
+  });
+});
+
+describe('preprod container alias', () => {
+  const unconfigured: ContainerIds = { web: 'GTM-WEB', server: 'GTM-SRV', preprod: null };
+
+  it('list_containers reports every alias, null when not configured', async () => {
+    const handlers = captureTools(servicesWith({ containers: unconfigured }));
+    const payload = await callTool(handlers, 'list_containers');
+    expect(payload).toEqual({ web: 'GTM-WEB', server: 'GTM-SRV', preprod: null });
+  });
+
+  it('reads the preprod mirror when configured', async () => {
+    const read = vi.fn(() => Promise.resolve(ok(emptyState())));
+    const handlers = captureTools(servicesWith({ mirrorReader: { read } }));
+
+    const res = await rawCall(handlers, 'search_container', { container: 'preprod', query: 'x' });
+
+    expect(res.isError).toBeUndefined();
+    expect(read).toHaveBeenCalledWith('preprod');
+  });
+
+  it('fails a preprod call with a clear error when not configured, and logs it', async () => {
+    const toolCalls = new InMemoryToolCallRepository();
+    const read = vi.fn(() => Promise.resolve(ok(emptyState())));
+    const handlers = captureTools(
+      servicesWith({ containers: unconfigured, toolCalls, mirrorReader: { read } }),
+    );
+
+    const res = await rawCall(handlers, 'export_container', { container: 'preprod' });
+
+    expect(res.isError).toBe(true);
+    const first = res.content[0];
+    expect(first?.type === 'text' ? first.text : '').toContain('GTM_PREPROD_CONTAINER_ID');
+    expect(read).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(toolCalls.records.length).toBe(1));
+    expect(toolCalls.records[0]).toMatchObject({ container: 'preprod', outcome: 'error' });
+  });
+
+  it('leaves web calls working when preprod is not configured', async () => {
+    const read = vi.fn(() => Promise.resolve(ok(emptyState())));
+    const handlers = captureTools(
+      servicesWith({ containers: unconfigured, mirrorReader: { read } }),
+    );
+
+    const res = await rawCall(handlers, 'export_container', { container: 'web' });
+
+    expect(res.isError).toBeUndefined();
   });
 });

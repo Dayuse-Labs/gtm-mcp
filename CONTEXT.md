@@ -1,6 +1,6 @@
 # GTM Integration
 
-A remote MCP server that lets collaborators use an AI agent to read and change two Google Tag Manager containers (web + server), where GTM stays the source of truth and every agent-made change is captured as a reviewable, replayable record.
+A remote MCP server that lets collaborators use an AI agent to read and change three Google Tag Manager containers (web, server, preprod), where GTM stays the source of truth and every agent-made change is captured as a reviewable, replayable record.
 
 ## Language
 
@@ -15,7 +15,7 @@ Execute a changeset's operations into a GTM workspace. One-directional: changese
 _Avoid_: push, deploy, sync
 
 **Publish**:
-The human action, performed in the GTM UI, that turns a workspace into a live container version. Never performed by the agent — the MCP holds no publish scope.
+Turning an applied changeset's workspace into a live container version (the `publish` tool, or a human in the GTM UI). Only after the change is observed in GTM Preview; admin-only (ADR 0011).
 _Avoid_: release, ship, go-live
 
 **Mirror**:
@@ -45,13 +45,13 @@ The full prior state of an entity, captured at Apply time (from the drift pull) 
 _Avoid_: snapshot, undo-record
 
 **Plan**:
-A grouping of related changesets across both containers (e.g. a web change plus its server-side counterpart). Coordinates intent only — there is no cross-container atomicity; each changeset is still applied and published independently.
+A grouping of related changesets across containers (e.g. a web change plus its server-side counterpart, or the same change on preprod and web). Coordinates intent only — there is no cross-container atomicity; each changeset is still applied and published independently.
 _Avoid_: batch, bundle, release
 
 ### GTM structure
 
 **Container**:
-A GTM configuration unit. This project tracks exactly two, addressed by alias.
+A GTM configuration unit. This project tracks exactly three, addressed by alias.
 _Avoid_: tag manager, GTM
 
 **Web container** (alias `web`):
@@ -59,6 +59,9 @@ The client-side container running in the browser. Holds tags, triggers, variable
 
 **Server container** (alias `server`):
 The server-side (sGTM) container. Holds the web entity types **plus clients and transformations**.
+
+**Preprod container** (alias `preprod`):
+A separate web container (GTM-WMR4DMK) loaded by `*.dayuse-dev.com`. Web-kind; shares the prod sGTM (`server`) and the prod Meta pixel. Not an environment of `web`: it drifts from it, so a change meant for both is a Plan of two changesets (ADR 0012).
 
 **Workspace**:
 GTM's draft layer over the live version. Edits live here until published. Free plan caps a container at 3 (one is the permanent Default), so only 2 agent changesets can be pending at once.

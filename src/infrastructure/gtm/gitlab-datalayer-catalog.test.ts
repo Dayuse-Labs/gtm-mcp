@@ -41,7 +41,10 @@ describe('GitlabDatalayerCatalog', () => {
     });
     const r = await c.listEvents();
     expect(r.success).toBe(true);
-    if (r.success) expect(r.data).toContain('purchase');
+    if (r.success) {
+      expect(r.data.events).toContain('purchase');
+      expect(r.data.staleWarning).toBeNull();
+    }
     expect(f.calls()).toBe(1);
   });
 
@@ -132,6 +135,25 @@ describe('GitlabDatalayerCatalog', () => {
     expect(r.success).toBe(true);
     if (r.success) expect(r.data).toContain('stale catalog');
     expect(n).toBe(2);
+  });
+
+  it('flags a stale copy on the event index too', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const dir = tmp();
+    await new GitlabDatalayerCatalog({
+      token: 't',
+      projectId: '1',
+      cacheDir: dir,
+      fetcher: okFetcher().fetch,
+    }).listEvents();
+
+    const r = await new GitlabDatalayerCatalog({
+      token: 't',
+      projectId: '1',
+      cacheDir: dir,
+      fetcher: failFetcher,
+    }).listEvents();
+    expect(r.success && r.data.staleWarning).toContain('GitLab responded 403');
   });
 
   it('errors when no copy exists anywhere', async () => {

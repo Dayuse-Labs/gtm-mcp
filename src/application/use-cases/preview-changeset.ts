@@ -8,6 +8,8 @@ import { kindsForContainer } from '../../domain/value-objects/entity-kind.js';
 import { buildBaseline } from '../../domain/services/drift.js';
 import { analyzeImpacts } from '../../domain/services/impact-analysis.js';
 import { summarize } from '../../domain/services/operation-summary.js';
+import { validateDataRefs } from '../../domain/services/data-refs.js';
+import { authorizeOperations } from '../../domain/services/role-policy.js';
 import { type Result, ok, err } from '../../shared/result.js';
 
 export class ChangesetValidationError extends Error {
@@ -48,6 +50,8 @@ function validateShape(input: PreviewInput): Result<void, ChangesetValidationErr
       return err(new ChangesetValidationError(`create ${op.entity} requires data.`));
     }
   }
+  const refs = validateDataRefs(input.operations);
+  if (!refs.success) return err(new ChangesetValidationError(refs.error.message));
   return ok(undefined);
 }
 
@@ -58,6 +62,8 @@ export async function previewChangeset(
 ): Promise<Result<Preview>> {
   const shape = validateShape(input);
   if (!shape.success) return shape;
+  const allowed = authorizeOperations(input.author, input.operations);
+  if (!allowed.success) return allowed;
 
   const pulled = await deps.gtm.pull(input.container);
   if (!pulled.success) return pulled;
