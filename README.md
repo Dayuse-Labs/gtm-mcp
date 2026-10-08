@@ -75,6 +75,8 @@ We store collaborator **emails** (personal data) and encrypted OAuth tokens in P
 | Database    | Postgres   | `d282b6b7-7838-4d7b-ae76-c24716dc940d` |
 | App service | gtm-mcp    | `50f079b2-107b-4126-8598-8dded1904f41` |
 
+**Continuous deployment:** Railway builds and deploys every push to `main` (GitHub source `Dayuse-Labs/gtm-mcp`). GitHub Actions CI (`.github/workflows/ci.yml`: lint, format, typecheck, tests, build) runs on every PR and push; with Railway's **Wait for CI** enabled on the service, a red `main` is never deployed. Each deploy runs `db/migrations` (pre-deploy command in `railway.json`) before the new version takes traffic, so migrations must stay idempotent and backward-compatible with the running version.
+
 App service vars set: `NODE_ENV=production`, `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `PENDING_CHANGESET_TTL_HOURS=72`.
 
 **Still to set before deploy** (secrets + domain): `TOKEN_ENCRYPTION_KEY`, `GOOGLE_OAUTH_CLIENT_ID/SECRET/REDIRECT_URI`, `GTM_ACCOUNT_ID/WEB_CONTAINER_ID/SERVER_CONTAINER_ID`, optional `GTM_PREPROD_CONTAINER_ID` (`41658217`; unset ⇒ `preprod` reports "not configured", ADR 0012), `GOOGLE_CHAT_WEBHOOK_URL`, `GITLAB_TOKEN` + `GITLAB_CATALOG_PROJECT_ID` (dataLayer catalog — ADR 0008; `GITLAB_TOKEN` is a Railway secret), `MCP_PUBLIC_URL` (after a public domain is generated). Set the Postgres + app service to an **EU region** (RGPD).
