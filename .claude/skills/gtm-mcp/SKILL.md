@@ -5,7 +5,7 @@ description: Drive the GTM MCP server from this repo as the technical operator �
 
 # GTM MCP
 
-How to drive the GTM MCP server and grow the docs. Domain facts live in `docs/gtm/`, not here.
+How to drive the GTM MCP server and grow the docs. Domain facts live in `docs/gtm/`, not here. For the end-to-end change workflow (including the browser checks before and after a write), follow the `gtm-change` skill.
 
 ## Connect
 
@@ -28,11 +28,13 @@ curl -sS -X POST http://localhost:3050/mcp \
 
 Call `tools/list` first to see the tools and their input schemas.
 
+Container aliases: `web` (prod web), `server` (prod sGTM), `preprod` (preprod web GTM-WMR4DMK, loaded by `*.dayuse-dev.com`; web-kind, its own changesets).
+
 ## Efficient workflow
 
 GTM's API quota is tight (~3-5 calls/min). Work from the mirror, not the live API.
 
-1. **`pull` the container ONCE** — refreshes the local mirror. The only step that costs GTM quota.
+1. **`pull` the container ONCE** — refreshes the local mirror from the **live (published) version**, not the Default Workspace. The only read that costs GTM quota; `get_entity` / `list_entities` read the mirror too. Quota errors are retried server-side with backoff (up to ~2 min).
 2. **Understand + locate from the mirror (ZERO quota):**
    - `export_container` — the whole container in one call (default compact).
    - `search_container` — every entity carrying a value/string, not just by name.
@@ -45,7 +47,7 @@ GTM's API quota is tight (~3-5 calls/min). Work from the mirror, not the live AP
 4. **Two-phase write:**
    - `preview` — validate + return impacts. READ the impacts before applying.
    - `apply` — writes to a fresh workspace for human review. Check `workspace_status` first (per-container pending cap).
-5. **Never publish** — you can't, by design. The human reviews + publishes in the GTM UI.
+5. **Publish** with `publish {changesetId}` only after the change is observed in GTM Preview (`gtm-change` step 5). Admin-only; it refuses on drift, conflict or compiler error. Role limits (ADR 0011): collaborators cannot change custom templates, clients or transformations, and act only on their own changesets.
 6. **Change client + server together.** A tracking change usually spans both containers (web emits/forwards a value; sGTM consumes it / sends onward). Author the web changeset AND its server counterpart in the same pass and `preview` both, so the full `dataLayer → sGTM → tag` flow exists at once and is testable **end-to-end in one GTM Preview session**. Never ship a client-only or server-only half-state — it can't be validated and risks a live gap. (Still one changeset/workspace per container — pair them, preview both, publish both.)
 7. **Reuse a signal's established name across containers** — forward/read it under its existing client-side name (e.g. `didConsentToFacebook`), don't coin a server-side synonym. See `docs/gtm/conventions.md`.
 
