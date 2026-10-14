@@ -26,6 +26,7 @@ const EnvSchema = z
     GTM_SERVER_CONTAINER_ID: z.string().min(1),
     // Optional so deployments without the preprod container still boot (ADR 0012).
     GTM_PREPROD_CONTAINER_ID: z.string().min(1).optional(),
+    GTM_HUBSPOT_CONTAINER_ID: z.string().min(1).optional(),
 
     GOOGLE_CHAT_WEBHOOK_URL: z.string().url().optional(),
     PENDING_CHANGESET_TTL_HOURS: z.coerce.number().int().positive().default(72),

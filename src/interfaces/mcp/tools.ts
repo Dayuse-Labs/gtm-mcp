@@ -238,7 +238,7 @@ export function registerTools(server: McpServer, s: Services): void {
     'list_containers',
     {
       description:
-        'List the container aliases (web, server, preprod) and their GTM container ids; null means the alias is not configured on this server.',
+        'List the container aliases (web, server, preprod, hubspot) and their GTM container ids; null means the alias is not configured on this server.',
       inputSchema: {},
     },
     () => text(s.containers),

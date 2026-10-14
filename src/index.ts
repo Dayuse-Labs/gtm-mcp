@@ -35,6 +35,7 @@ const cfg: GtmContainerConfig = {
     web: env.GTM_WEB_CONTAINER_ID,
     server: env.GTM_SERVER_CONTAINER_ID,
     preprod: env.GTM_PREPROD_CONTAINER_ID ?? null,
+    hubspot: env.GTM_HUBSPOT_CONTAINER_ID ?? null,
   },
 };
 const oauth = new GoogleOAuth({
