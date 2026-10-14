@@ -16,7 +16,7 @@ describe('parseContainerAlias', () => {
 });
 
 describe('resolveContainerId', () => {
-  const ids: ContainerIds = { web: '1', server: '2', preprod: null };
+  const ids: ContainerIds = { web: '1', server: '2', preprod: null, hubspot: null };
 
   it('returns the configured id', () => {
     expect(resolveContainerId(ids, 'web')).toEqual({ success: true, data: '1' });

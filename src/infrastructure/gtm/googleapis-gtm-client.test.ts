@@ -4,7 +4,7 @@ import { GoogleApisGtmClient } from './googleapis-gtm-client.js';
 
 const client = new GoogleApisGtmClient(new google.auth.OAuth2(), {
   accountId: '128104592',
-  containerIds: { web: '1', server: '2', preprod: null },
+  containerIds: { web: '1', server: '2', preprod: null, hubspot: null },
 });
 
 describe('GoogleApisGtmClient with an unconfigured alias', () => {
@@ -29,7 +29,7 @@ describe('GoogleApisGtmClient.deleteWorkspace', () => {
   function clientWith(remaining: string[]) {
     const c = new GoogleApisGtmClient(new google.auth.OAuth2(), {
       accountId: '128104592',
-      containerIds: { web: '1', server: '2', preprod: null },
+      containerIds: { web: '1', server: '2', preprod: null, hubspot: null },
     });
     const workspaces = {
       delete: vi.fn().mockRejectedValue(internalError),

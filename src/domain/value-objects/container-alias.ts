@@ -2,10 +2,10 @@ import { z } from 'zod';
 import { type Result, ok, err } from '../../shared/result.js';
 
 /**
- * The project tracks three containers, addressed by alias (ADR 0004, ADR 0012).
+ * The project tracks four containers, addressed by alias (ADR 0004, ADR 0012).
  * `preprod` is web-kind: it is a separate web container, not an environment of `web`.
  */
-export const ContainerAliasSchema = z.enum(['web', 'server', 'preprod']);
+export const ContainerAliasSchema = z.enum(['web', 'server', 'preprod', 'hubspot']);
 export type ContainerAlias = z.infer<typeof ContainerAliasSchema>;
 
 export const CONTAINER_ALIASES: readonly ContainerAlias[] = ContainerAliasSchema.options;

@@ -60,7 +60,12 @@ function servicesWith(over: Over = {}): Services {
     changesets: new InMemoryChangesetRepository(),
     toolCalls: over.toolCalls ?? new InMemoryToolCallRepository(),
     notifier: over.notifier ?? null,
-    containers: over.containers ?? { web: 'GTM-WEB', server: 'GTM-SRV', preprod: 'GTM-PRE' },
+    containers: over.containers ?? {
+      web: 'GTM-WEB',
+      server: 'GTM-SRV',
+      preprod: 'GTM-PRE',
+      hubspot: 'GTM-HUB',
+    },
     now: () => new Date('2026-06-15T00:00:00.000Z'),
     newId: () => 'id-1',
     previewTtlHours: 24,
@@ -237,12 +242,17 @@ describe('google chat error push (ADR 0010)', () => {
 });
 
 describe('preprod container alias', () => {
-  const unconfigured: ContainerIds = { web: 'GTM-WEB', server: 'GTM-SRV', preprod: null };
+  const unconfigured: ContainerIds = {
+    web: 'GTM-WEB',
+    server: 'GTM-SRV',
+    preprod: null,
+    hubspot: null,
+  };
 
   it('list_containers reports every alias, null when not configured', async () => {
     const handlers = captureTools(servicesWith({ containers: unconfigured }));
     const payload = await callTool(handlers, 'list_containers');
-    expect(payload).toEqual({ web: 'GTM-WEB', server: 'GTM-SRV', preprod: null });
+    expect(payload).toEqual({ web: 'GTM-WEB', server: 'GTM-SRV', preprod: null, hubspot: null });
   });
 
   it('reads the preprod mirror when configured', async () => {
