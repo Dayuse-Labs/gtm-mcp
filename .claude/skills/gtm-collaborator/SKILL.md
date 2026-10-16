@@ -42,9 +42,9 @@ Always start broad (`list_datalayer_events`), then drill into one event. The cat
 
 ## How we name things (quick reference)
 
-- **Commercial type:** `dayaccess` — lowercase in data/conditions, `Dayaccess` capitalised in names. Legacy value was `daypass` (being retired).
-- **Web trigger names:** lowercase event + qualifier, e.g. `purchase (dayaccess)`.
-- **Web pixel tags:** `<Platform> - <Action> <type>`, e.g. `Facebook - Purchase dayaccess`.
+- **Commercial type:** `daypass` — lowercase in data/conditions, `Daypass` capitalised in names. `dayaccess` (2026-06-15 → 2026-10-16) is retired; some pixel/server tag names and Meta event labels still carry it (see `docs/gtm/conventions.md`).
+- **Web trigger names:** lowercase event + qualifier, e.g. `purchase (daypass)`.
+- **Web pixel tags:** `<Platform> - <Action> <type>`, e.g. `Facebook - Purchase daypass` (existing pixels still say `dayaccess`).
 - **Server tags:** `<Platform/Product> - <Qualifier> <Action>` — type is **Capitalised in names** but **lowercase in filter values**.
 - **Variable prefixes:** `dlv - ` (dataLayer variable), `JS - ` / `js - ` (custom JS), `eventData - ` (server-side).
 - **Purchase trigger** fires on `{{_event}} == "transaction"` AND the commercial-type clause `== "<type>"`.

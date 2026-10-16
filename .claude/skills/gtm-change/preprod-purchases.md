@@ -4,7 +4,7 @@ How to verify a purchase or checkout change (step 5 of the `gtm-change` skill). 
 
 ## Where
 
-- Site: `https://fr.www.dayuse-dev.com/`. Dayaccess offers: `/search-dayaccess` → hotel → offer **Select** → date → **Reserve** → `/tunnel/booking` (identification, personalization, payment).
+- Site: `https://fr.www.dayuse-dev.com/`. Daypass offers: `/search-daypass` → hotel → offer **Select** → date → **Reserve** → `/tunnel/booking` (identification, personalization, payment).
 - Some offers answer `(12004) This reservation is no longer available` for every date; pick another hotel.
 - Identity: clearly fake data (`GTM Test`, `gtm-test@dayuse.com`, a 555 phone). Continue without account.
 - Checkout is fully prepaid by card (Adyen); there is no pay-at-hotel path. The terms checkbox sits on the personalization step.

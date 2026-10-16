@@ -6,18 +6,18 @@ Naming and structure conventions observed in our GTM containers.
 
 ## Entity naming
 
-- **Web triggers** for ecommerce events: lowercase event name with a qualifier in parentheses, e.g. `purchase (dayaccess)`. The qualifier is the commercial type.
-- **Web tags** (pixels): `<Platform> - <Action> <commercialType>`, e.g. `Facebook - Purchase dayaccess`.
+- **Web triggers** for ecommerce events: lowercase event name with a qualifier in parentheses, e.g. `purchase (daypass)`. The qualifier is the commercial type.
+- **Web tags** (pixels): `<Platform> - <Action> <commercialType>`, e.g. `Facebook - Purchase daypass`. Existing Facebook pixel tags are still named `... dayaccess` / `Dayaccess...` (not renamed on 2026-10-16).
 - **Server tags**: `<Platform/Product> - <Qualifier> <Action>`, e.g. `Google Ads Conversion Tracking - Dayaccess Purchase`, `... - Dayaccess New Client Purchase`. Note: in tag/trigger NAMES the commercial type is Capitalised (`Dayaccess`), but in trigger filter VALUES it is lowercase (`dayaccess`) because it matches the raw dataLayer/eventData string.
-- **Server triggers**: `GoogleAds - <Qualifier> <action>`, e.g. `GoogleAds - Dayaccess purchase`, `GoogleAds - Dayaccess new client purchase`.
-- **Server Meta tags**: `Facebook cAPI - <Qualifier> <Action>`, trigger `Facebook - <Qualifier> <action>`, e.g. `Facebook cAPI - Dayaccess Purchase` on `Facebook - Dayaccess purchase` (server ws 83).
+- **Server triggers**: `GoogleAds - <Qualifier> <action>`, e.g. `GoogleAds - Daypass purchase`, `GoogleAds - Daypass new client purchase`.
+- **Server Meta tags**: `Facebook cAPI - <Qualifier> <Action>`, trigger `Facebook - <Qualifier> <action>`, e.g. `Facebook cAPI - Dayaccess Purchase` (tag name not renamed) on `Facebook - Daypass purchase` (server ws 83).
 - **Variable naming prefixes** seen: `dlv - ` (dataLayer variable), `JS - ` / `js - ` (custom JS), `eventData - ` (server-side event-data variable on sGTM).
 - **Reuse a signal's established name across containers — don't invent synonyms.** A value already named client-side keeps that name when forwarded to and read on the server. E.g. the Meta consent signal is `JS - didConsentToFacebook` web-side → forward it on the GA4 hit as `didConsentToFacebook` and read it server-side as `eventData - didConsentToFacebook` (NOT a new name like `fb_consent`). One name end-to-end keeps the dataLayer→sGTM flow greppable.
 
 ## Commercial type
 
-- Canonical commercial-type value as of 2026-06-15: **`dayaccess`** (lowercase in data/conditions, `Dayaccess` capitalised in display/entity names).
-- Renamed from the legacy value **`daypass`** (display: `Daypass`). The legacy value should no longer appear anywhere once the pending workspaces are published.
+- Canonical commercial-type value as of 2026-10-16: **`daypass`** (lowercase in data/conditions, `Daypass` capitalised in display/entity names), matching the catalog `CommercialType = "dayuse" | "daypass"`.
+- `dayaccess` (display `Dayaccess`) was the value from 2026-06-15 to 2026-10-16 and is retired. All trigger filters and trigger names were switched back on 2026-10-16. Still carrying the old name on purpose: Facebook pixel tags 1539/1563/1564 (preprod 1793), server tags 60/61/75/76/78, and the Meta event labels `Bookings Dayaccess`, `DayaccessHotelPageView`, `DayaccessInitiateCheckout` (renaming labels splits Meta audiences; browser and server purchase labels must stay identical for dedup).
 
 ## Trigger filter shape
 
