@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Remote MCP server that lets collaborators read and change two GTM containers (web + server), GTM staying source of truth.",
   "engines": {
-    "node": ">=22"
+    "node": "22.23.4"
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
